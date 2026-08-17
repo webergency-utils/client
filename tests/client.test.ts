@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Client, { CancelToken, HttpError, CookieJar, resolveUrl } from '../client';
+import Client, { CancelToken, HttpError, CookieJar, resolveUrl } from '../src/client';
 
 function jsonResponse( body: unknown, init: ResponseInit = {} ): Response
 {
@@ -849,5 +849,558 @@ describe( 'Client', () =>
         });
 
         await expect( client.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({ code: 'CANCELED' });
+    });
+
+    it( 'should expose buffer and stream shortcuts on ClientPromise', async () =>
+    {
+        const client = new Client({
+            fetch : ( async () => new Response( 'hi' ) ) as typeof fetch
+        });
+
+        expect( new TextDecoder().decode( await client.get( 'https://example.com/x' ).buffer() ) ).toBe( 'hi' );
+        expect( await new Response( await client.get( 'https://example.com/x' ).stream() ).text() ).toBe( 'hi' );
+    });
+
+    it( 'should accept Headers, header tuples, and skip undefined header values', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({}));
+        const client = new Client({
+            headers : new Headers({ 'x-a': '1' }),
+            fetch   : fetchMock as typeof fetch
+        });
+
+        await client.get( 'https://api.example.com/x', {
+            headers : [ [ 'x-b', '2' ] ] as HeadersInit
+        });
+
+        const client2 = new Client({
+            headers : { 'x-c': [ 'p', 'q' ], 'x-skip': undefined } as HeadersInit,
+            fetch   : fetchMock as typeof fetch
+        });
+
+        await client2.get( 'https://api.example.com/y' );
+        expect(( fetchMock.mock.calls[0][0] as Request ).headers.get( 'x-a' ) ).toBe( '1' );
+        expect(( fetchMock.mock.calls[0][0] as Request ).headers.get( 'x-b' ) ).toBe( '2' );
+        expect(( fetchMock.mock.calls[1][0] as Request ).headers.get( 'x-c' ) ).toBe( 'p, q' );
+        expect(( fetchMock.mock.calls[1][0] as Request ).headers.has( 'x-skip' ) ).toBe( false );
+    });
+
+    it( 'should leave a relative path unchanged without a webroot', () =>
+    {
+        expect( resolveUrl( undefined, '/local' ) ).toBe( '/local' );
+    });
+
+    it( 'should disable an inherited cookie jar with cookieJar false', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.headers.get( 'cookie' ) ).toBeNull();
+
+            return jsonResponse({});
+        });
+        const parent = new Client({ cookieJar: true, fetch: fetchMock as typeof fetch });
+
+        parent.cookieJar!.set( 'https://example.com/', 'sid=1; Path=/' );
+
+        const child = parent.extend({ cookieJar: false });
+
+        await child.get( 'https://example.com/' );
+        expect( child.cookieJar ).toBeUndefined();
+    });
+
+    it( 'should throw NETWORK on a non-abort fetch failure', async () =>
+    {
+        const client = new Client({
+            retry : 0,
+            fetch : ( async () => { throw new Error( 'econnreset' ) } ) as typeof fetch
+        });
+
+        await expect( client.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({ code: 'NETWORK' });
+    });
+
+    it( 'should parse empty and non-JSON error bodies', async () =>
+    {
+        const empty = new Client({
+            fetch : ( async () => new Response( '', { status: 500 }) ) as typeof fetch
+        });
+
+        await expect( empty.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({
+            code : 'HTTP_ERROR',
+            body : undefined
+        });
+
+        const text = new Client({
+            fetch : ( async () => new Response( 'nope', { status: 500 }) ) as typeof fetch
+        });
+
+        await expect( text.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({
+            code : 'HTTP_ERROR',
+            body : 'nope'
+        });
+    });
+
+    it( 'should not follow redirects when redirect is manual', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.redirect ).toBe( 'manual' );
+
+            return new Response( null, { status: 302, headers: { location: '/b' } });
+        });
+        const client = new Client({
+            cookieJar : true,
+            redirect  : 'manual',
+            fetch     : fetchMock as typeof fetch
+        });
+
+        const res = await client.get( 'https://example.com/a', { throwHttpError: false });
+
+        expect( res.status ).toBe( 302 );
+        expect( fetchMock ).toHaveBeenCalledOnce();
+    });
+
+    it( 'should apply a Request returned from beforeRedirect and attach cookies', async () =>
+    {
+        const jar = new CookieJar();
+
+        jar.set( 'https://app.example.com/', 'sid=abc; Path=/; Domain=example.com; SameSite=Lax; Secure' );
+
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            if( input.url === 'https://app.example.com/start' )
+            {
+                return new Response( null, {
+                    status  : 302,
+                    headers : { location: 'https://app.example.com/skip' }
+                });
+            }
+
+            expect( input.url ).toBe( 'https://api.example.com/home' );
+            expect( input.method ).toBe( 'GET' );
+            expect( input.headers.get( 'cookie' ) ).toBe( 'sid=abc' );
+
+            return jsonResponse({ ok: true });
+        });
+        const client = new Client({
+            cookieJar : jar,
+            fetch     : fetchMock as typeof fetch,
+            hooks     : {
+                beforeRedirect : [
+                    () => new Request( 'https://api.example.com/home', { method: 'GET' })
+                ]
+            }
+        });
+
+        await client.get( 'https://app.example.com/start' );
+        expect( fetchMock ).toHaveBeenCalledTimes( 2 );
+    });
+
+    it( 'should pass remaining fetch init fields onto Request', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            const probe = new Request( 'https://example.com/', {
+                integrity      : 'sha256-abc',
+                keepalive      : true,
+                referrer       : 'https://example.com/',
+                referrerPolicy : 'no-referrer'
+            });
+
+            if( probe.integrity ){ expect( input.integrity ).toBe( 'sha256-abc' ) }
+
+            if( probe.keepalive ){ expect( input.keepalive ).toBe( true ) }
+
+            if( probe.referrer ){ expect( input.referrer ).toBe( 'https://example.com/' ) }
+
+            if( probe.referrerPolicy ){ expect( input.referrerPolicy ).toBe( 'no-referrer' ) }
+
+            return jsonResponse({});
+        });
+        const client = new Client({
+            integrity      : 'sha256-abc',
+            keepalive      : true,
+            referrer       : 'https://example.com/',
+            referrerPolicy : 'no-referrer',
+            fetch          : fetchMock as typeof fetch
+        });
+
+        await client.get( 'https://api.example.com/x' );
+    });
+
+    it( 'should set duplex on streaming POST bodies', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.method ).toBe( 'POST' );
+
+            return jsonResponse({});
+        });
+        const client = new Client({
+            duplex : 'half',
+            fetch  : fetchMock as typeof fetch
+        });
+
+        await client.post( 'https://api.example.com/x', {
+            body     : new ReadableStream({
+                start( controller )
+                {
+                    controller.enqueue( new TextEncoder().encode( 'x' ) );
+                    controller.close();
+                }
+            }),
+            priority : 'high'
+        });
+
+        expect( fetchMock ).toHaveBeenCalledOnce();
+    });
+
+    it( 'should let afterResponse replace the Response', async () =>
+    {
+        const client = new Client({
+            fetch : ( async () => jsonResponse({ a: 1 }) ) as typeof fetch,
+            hooks : {
+                afterResponse : [
+                    () => new Response( JSON.stringify({ a: 2 }), {
+                        status  : 200,
+                        headers : { 'content-type': 'application/json' }
+                    })
+                ]
+            }
+        });
+
+        expect(( await client.get( 'https://api.example.com/x' ) ).data ).toEqual({ a: 2 });
+    });
+
+    it( 'should let beforeError replace the HttpError', async () =>
+    {
+        const client = new Client({
+            fetch : ( async () => jsonResponse({ e: 1 }, { status: 500 }) ) as typeof fetch,
+            hooks : {
+                beforeError : [
+                    () => new HttpError( 'rewritten', { code: 'HTTP_ERROR', status: 500 })
+                ]
+            }
+        });
+
+        await expect( client.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({
+            message : 'rewritten'
+        });
+    });
+
+    it( 'should run beforeRetry on a retryable network error', async () =>
+    {
+        let calls = 0;
+        let retried = 0;
+        const client = new Client({
+            retry : { limit: 1, delay: () => 0 },
+            fetch : ( async () =>
+            {
+                calls += 1;
+
+                if( calls === 1 ){ throw new Error( 'reset' ) }
+
+                return jsonResponse({ ok: true });
+            }) as typeof fetch,
+            hooks : {
+                beforeRetry : [ async () => { retried += 1 } ]
+            }
+        });
+
+        expect(( await client.get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+        expect( retried ).toBe( 1 );
+    });
+
+    it( 'should skip empty query objects and append to an existing query string', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({}));
+        const client = new Client({ fetch: fetchMock as typeof fetch });
+
+        await client.get( 'https://api.example.com/x', { query: { skip: undefined } });
+        await client.get( 'https://api.example.com/x?keep=1', { query: { a: 1 } });
+
+        expect( fetchMock ).toHaveBeenCalledTimes( 2 );
+        expect(( fetchMock.mock.calls[0][0] as Request ).url ).toBe( 'https://api.example.com/x' );
+        expect(( fetchMock.mock.calls[1][0] as Request ).url ).toBe( 'https://api.example.com/x?keep=1&a=1' );
+    });
+
+    it( 'should cover remaining instance and static verbs', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({}));
+        const fetchImpl = fetchMock as typeof fetch;
+        const client = new Client({ fetch: fetchImpl });
+
+        await client.put( 'https://api.example.com/x' );
+        await client.patch( 'https://api.example.com/x' );
+        await client.delete( 'https://api.example.com/x' );
+        await client.head( 'https://api.example.com/x' );
+        await Client.put( 'https://api.example.com/x', { fetch: fetchImpl });
+        await Client.patch( 'https://api.example.com/x', { fetch: fetchImpl });
+        await Client.delete( 'https://api.example.com/x', { fetch: fetchImpl });
+        await Client.head( 'https://api.example.com/x', { fetch: fetchImpl });
+        await Client.post( 'https://api.example.com/x', { fetch: fetchImpl });
+        await Client.options( 'https://api.example.com/x', { fetch: fetchImpl });
+
+        expect( fetchMock ).toHaveBeenCalledTimes( 10 );
+    });
+
+    it( 'should compose timeout with a user AbortSignal when AbortSignal.any is missing', async () =>
+    {
+        const original = AbortSignal.any;
+        // @ts-expect-error — older runtimes
+        delete AbortSignal.any;
+
+        try
+        {
+            const client = new Client({
+                timeout : 50,
+                signal  : AbortSignal.abort( 'pre-aborted' ),
+                fetch   : ( async ( input: Request ) =>
+                {
+                    if( input.signal.aborted )
+                    {
+                        throw Object.assign( new Error( 'Aborted' ), { name: 'AbortError' });
+                    }
+
+                    return jsonResponse({});
+                }) as typeof fetch
+            });
+
+            await expect( client.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({ code: 'CANCELED' });
+        }
+        finally
+        {
+            AbortSignal.any = original;
+        }
+    });
+
+    it( 'should merge timeout and user signals with AbortSignal.any', async () =>
+    {
+        const client = new Client({
+            timeout : 5_000,
+            signal  : new AbortController().signal,
+            fetch   : ( async () => jsonResponse({ ok: true }) ) as typeof fetch
+        });
+
+        expect(( await client.get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+    });
+
+    it( 'should copy Blob content-type during upload progress when unset', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.headers.get( 'content-type' )?.startsWith( 'text/plain' ) ).toBe( true );
+
+            return jsonResponse({});
+        });
+        const client = new Client({ fetch: fetchMock as typeof fetch });
+
+        await client.post( 'https://api.example.com/x', {
+            body             : new Blob([ 'hi' ], { type: 'text/plain' }),
+            onUploadProgress : () => {}
+        });
+    });
+
+    it( 'should run beforeRetry when retrying a 503', async () =>
+    {
+        let calls = 0;
+        let retried = 0;
+        const client = new Client({
+            retry : { limit: 1, delay: () => 0 },
+            fetch : ( async () =>
+            {
+                calls += 1;
+
+                if( calls === 1 ){ return jsonResponse({}, { status: 503 }) }
+
+                return jsonResponse({ ok: true });
+            }) as typeof fetch,
+            hooks : {
+                beforeRetry : [ async () => { retried += 1 } ]
+            }
+        });
+
+        expect(( await client.get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+        expect( retried ).toBe( 1 );
+    });
+
+    it( 'should pass redirect error through to fetch', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.redirect ).toBe( 'error' );
+
+            return jsonResponse({});
+        });
+        const client = new Client({
+            redirect : 'error',
+            fetch    : fetchMock as typeof fetch
+        });
+
+        await client.get( 'https://api.example.com/x' );
+        expect( fetchMock ).toHaveBeenCalledOnce();
+    });
+
+    it( 'should reuse the parent jar when extend sets cookieJar true', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({}) );
+        const parent = new Client({ cookieJar: true, fetch: fetchMock as typeof fetch });
+        const child = parent.extend({ cookieJar: true });
+
+        expect( child.cookieJar ).toBe( parent.cookieJar );
+
+        parent.cookieJar!.set( 'https://example.com/', 'sid=1; Path=/' );
+
+        await child.get( 'https://example.com/' );
+        expect(( fetchMock.mock.calls[0][0] as Request ).headers.get( 'cookie' ) ).toBe( 'sid=1' );
+    });
+
+    it( 'should honor a per-request retry override', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({}, { status: 503 }) );
+        const client = new Client({
+            retry : { limit: 2, delay: () => 0 },
+            fetch : fetchMock as typeof fetch,
+            throwHttpError : false
+        });
+
+        const res = await client.get( 'https://api.example.com/x', { retry: 0 });
+
+        expect( res.status ).toBe( 503 );
+        expect( fetchMock ).toHaveBeenCalledOnce();
+    });
+
+    it( 'should honor a per-request cookie jar', async () =>
+    {
+        const jar = new CookieJar();
+
+        jar.set( 'https://example.com/', 'sid=1; Path=/' );
+
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            expect( input.headers.get( 'cookie' ) ).toBe( 'sid=1' );
+
+            return jsonResponse({});
+        });
+        const client = new Client({ fetch: fetchMock as typeof fetch });
+
+        await client.get( 'https://example.com/', { cookieJar: jar });
+    });
+
+    it( 'should fall back to global fetch when none is injected', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({ ok: true }) );
+        const original = globalThis.fetch;
+
+        globalThis.fetch = fetchMock as typeof fetch;
+
+        try
+        {
+            expect(( await new Client().get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+            expect( fetchMock ).toHaveBeenCalledOnce();
+        }
+        finally
+        {
+            globalThis.fetch = original;
+        }
+    });
+
+    it( 'should ignore a beforeRequest hook that does not return a Request', async () =>
+    {
+        const fetchMock = vi.fn( async () => jsonResponse({ ok: true }) );
+        const client = new Client({
+            fetch : fetchMock as typeof fetch,
+            hooks : { beforeRequest: [ () => undefined ] }
+        });
+
+        expect(( await client.get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+    });
+
+    it( 'should ignore afterResponse and beforeError hooks that do not replace the value', async () =>
+    {
+        const ok = new Client({
+            fetch : ( async () => jsonResponse({ ok: true }) ) as typeof fetch,
+            hooks : { afterResponse: [ () => undefined ] }
+        });
+
+        expect(( await ok.get( 'https://api.example.com/x' ) ).data ).toEqual({ ok: true });
+
+        const fail = new Client({
+            fetch : ( async () => jsonResponse({}, { status: 500 }) ) as typeof fetch,
+            hooks : { beforeError: [ () => undefined ] }
+        });
+
+        await expect( fail.get( 'https://api.example.com/x' ) ).rejects.toMatchObject({ code: 'HTTP_ERROR' });
+    });
+
+    it( 'should ignore a beforeRedirect hook that returns neither a Request nor a string', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            if( input.url.endsWith( '/a' ) )
+            {
+                return new Response( null, { status: 302, headers: { location: '/b' } });
+            }
+
+            return jsonResponse({ ok: true });
+        });
+        const client = new Client({
+            maxRedirects : 5,
+            fetch        : fetchMock as typeof fetch,
+            hooks        : { beforeRedirect: [ () => undefined ] }
+        });
+
+        expect(( await client.get( 'https://example.com/a' ) ).data ).toEqual({ ok: true });
+        expect( fetchMock ).toHaveBeenCalledTimes( 2 );
+    });
+
+    it( 'should follow a beforeRedirect Request without a cookie jar', async () =>
+    {
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            if( input.url === 'https://example.com/start' )
+            {
+                return new Response( null, { status: 302, headers: { location: '/skip' } });
+            }
+
+            expect( input.url ).toBe( 'https://example.com/home' );
+
+            return jsonResponse({ ok: true });
+        });
+        const client = new Client({
+            maxRedirects : 5,
+            fetch        : fetchMock as typeof fetch,
+            hooks        : {
+                beforeRedirect : [ () => new Request( 'https://example.com/home' ) ]
+            }
+        });
+
+        expect(( await client.get( 'https://example.com/start' ) ).data ).toEqual({ ok: true });
+        expect( fetchMock ).toHaveBeenCalledTimes( 2 );
+    });
+
+    it( 'should follow a beforeRedirect Request when the jar has no cookie for that hop', async () =>
+    {
+        const jar = new CookieJar();
+        const fetchMock = vi.fn( async ( input: Request ) =>
+        {
+            if( input.url === 'https://example.com/start' )
+            {
+                return new Response( null, { status: 302, headers: { location: '/skip' } });
+            }
+
+            expect( input.url ).toBe( 'https://other.example.net/home' );
+            expect( input.headers.get( 'cookie' ) ).toBeNull();
+
+            return jsonResponse({ ok: true });
+        });
+        const client = new Client({
+            cookieJar : jar,
+            fetch     : fetchMock as typeof fetch,
+            hooks     : {
+                beforeRedirect : [ () => new Request( 'https://other.example.net/home' ) ]
+            }
+        });
+
+        expect(( await client.get( 'https://example.com/start' ) ).data ).toEqual({ ok: true });
     });
 });

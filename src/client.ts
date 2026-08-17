@@ -145,7 +145,7 @@ function mergeHeaders( base?: HeadersInit, extra?: HeadersInit ): Record<string,
     return { ...lowercaseHeaders( base ), ...lowercaseHeaders( extra ) };
 }
 
-function mergeHooks( base?: ClientHooks, extra?: ClientHooks ): ClientHooks
+function mergeHooks( base?: ClientHooks, extra?: ClientHooks ): Required<ClientHooks>
 {
     return {
         beforeRequest   : [ ...( base?.beforeRequest ?? [] ), ...( extra?.beforeRequest ?? [] ) ],
@@ -270,7 +270,7 @@ function followManually( jar: CookieJar | undefined, options: RequestOptions ): 
 {
     if( options.redirect === 'manual' || options.redirect === 'error' ){ return false }
     if( jar ){ return true }
-    if(( options.hooks?.beforeRedirect?.length ?? 0 ) > 0 ){ return true }
+    if( options.hooks?.beforeRedirect?.length ){ return true }
     if( options.maxRedirects !== undefined ){ return true }
 
     return false;
@@ -315,25 +315,25 @@ async function drain( response: Response ): Promise<void>
 
 export default class Client
 {
-    #options : ClientOptions;
-    #jar     : CookieJar | undefined;
+    #options   : ClientOptions;
+    #cookieJar : CookieJar | undefined;
 
     constructor( options: ClientOptions = {} )
     {
         this.#options = options;
-        this.#jar = resolveJar( options.cookieJar );
+        this.#cookieJar = resolveJar( options.cookieJar );
     }
 
     get cookieJar(): CookieJar | undefined
     {
-        return this.#jar;
+        return this.#cookieJar;
     }
 
     extend( options: ClientOptions ): Client
     {
         const cookieJar = options.cookieJar === undefined
-            ? this.#jar
-            : resolveJar( options.cookieJar, options.cookieJar === true ? this.#jar : undefined );
+            ? this.#cookieJar
+            : resolveJar( options.cookieJar, options.cookieJar === true ? this.#cookieJar : undefined );
 
         return new Client({
             ...this.#options,
@@ -369,12 +369,13 @@ export default class Client
 
     async #dispatch( method: string, url: string, options: RequestOptions ): Promise<ClientResponse>
     {
+        const hooks = mergeHooks( this.#options.hooks, options.hooks );
         const merged: RequestOptions =
         {
             ...this.#options,
             ...options,
             headers        : mergeHeaders( this.#options.headers, options.headers ),
-            hooks          : mergeHooks( this.#options.hooks, options.hooks ),
+            hooks,
             throwHttpError : pick( options.throwHttpError, this.#options.throwHttpError, true ),
             timeout        : pick( options.timeout, this.#options.timeout, undefined ),
             retry          : options.retry !== undefined ? options.retry : this.#options.retry,
@@ -399,8 +400,8 @@ export default class Client
         };
 
         const jar = options.cookieJar !== undefined
-            ? resolveJar( options.cookieJar, this.#jar )
-            : this.#jar;
+            ? resolveJar( options.cookieJar, this.#cookieJar )
+            : this.#cookieJar;
 
         const retry = normalizeRetry( merged.retry );
         const doFetch = merged.fetch ?? fetch;
@@ -505,7 +506,7 @@ export default class Client
                 request = new Request( currentUrl, init );
             }
 
-            for( const hook of merged.hooks?.beforeRequest ?? [] )
+            for( const hook of hooks.beforeRequest )
             {
                 const next = await hook( request, merged );
 
@@ -524,7 +525,7 @@ export default class Client
 
                 if( error.code !== 'CANCELED' && shouldRetry({ attempt, method: currentMethod, retry, error }) )
                 {
-                    for( const hook of merged.hooks?.beforeRetry ?? [] )
+                    for( const hook of hooks.beforeRetry )
                     {
                         await hook( request, error, attempt );
                     }
@@ -552,7 +553,7 @@ export default class Client
                     let nextUrl = new URL( location, request.url ).toString();
                     let override: Request | undefined;
 
-                    for( const hook of merged.hooks?.beforeRedirect ?? [] )
+                    for( const hook of hooks.beforeRedirect )
                     {
                         const next = await hook( request, response, nextUrl, merged );
 
@@ -602,7 +603,7 @@ export default class Client
                 }
             }
 
-            for( const hook of merged.hooks?.afterResponse ?? [] )
+            for( const hook of hooks.afterResponse )
             {
                 const next = await hook( request, response, merged );
 
@@ -611,7 +612,7 @@ export default class Client
 
             if( shouldRetry({ attempt, method: currentMethod, retry, status: response.status }) )
             {
-                for( const hook of merged.hooks?.beforeRetry ?? [] )
+                for( const hook of hooks.beforeRetry )
                 {
                     await hook( request, undefined, attempt );
                 }
@@ -637,7 +638,7 @@ export default class Client
                     response
                 });
 
-                for( const hook of merged.hooks?.beforeError ?? [] )
+                for( const hook of hooks.beforeError )
                 {
                     const next = await hook( error );
 

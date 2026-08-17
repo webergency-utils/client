@@ -34,7 +34,7 @@ const session = await iam.get('/auth/session', {
 npm install @webergency-utils/client
 ```
 
-Requires a `fetch` runtime: Node.js 18+, or a browser / Worker with `fetch`, `FormData`, and `AbortSignal.timeout`. No peer dependencies or environment variables. The package does not import `node:stream`.
+Requires a `fetch` runtime: Node.js 18+, Bun, Deno, or a browser / Worker with `fetch`, `FormData`, and `AbortSignal.timeout`. No peer dependencies or environment variables. The package does not import `node:` modules.
 
 ## Architecture & Internals
 
@@ -56,7 +56,7 @@ options + path → URL / headers / body
 - **JSON** is the default for plain object `body` values. `form` / urlencoded `content-type` stringify via the same codec. `multipart` uses platform `FormData`.
 - **CookieJar** is opt-in. Native `fetch` does not persist cookies; when a jar is set, redirects are followed manually so intermediate `Set-Cookie` is applied. The same manual follow is used when `maxRedirects` or `beforeRedirect` is set. Cookie lookup uses the original request URL as the SameSite initiator for the whole redirect chain.
 - **Errors:** `!ok` throws `HttpError` by default. Opt out with `throwHttpError: false` or `validateStatus`. Network failures and timeouts still throw.
-- Dual ESM/CJS build. Zero runtime npm dependencies. No Node built-in imports, so the same bundle loads in browsers and Workers.
+- Dual ESM/CJS build. Zero runtime npm dependencies. No Node built-in imports, so the same bundle loads in Node, Bun, Deno, browsers, and Workers.
 
 ## Glossary
 
@@ -229,10 +229,10 @@ jar.set( 'https://example.com/', 'sid=abc; Path=/; Secure' );
 jar.get( 'https://example.com/app' ); // 'sid=abc'
 ```
 
-- **`set(url, cookie_str)`** — parse a `Set-Cookie` line in the context of `url`.
+- **`set(url, cookieStr)`** — parse a `Set-Cookie` line in the context of `url`.
 - **`storeFromResponse(url, headers)`** — ingest `headers.getSetCookie()`.
 - **`get(url, initiator?)`** — `Cookie` header value for `url` (empty string if none). `initiator` is the first-party URL of the request chain; `Client` passes the original request URL on every redirect hop.
-- **`cookies()`** — list stored records (`name`, `value`, `domain`, `path`, `samesite`, flags).
+- **`cookies()`** — list stored records (`name`, `value`, `domain`, `path`, `sameSite`, `httpOnly`, flags).
 
 Domain attributes that do not match the request host are ignored. `Secure` cookies are omitted on `http:`. Expired / `deleted` / empty values are dropped.
 

@@ -1,3 +1,5 @@
+import { getBuffer } from './runtime';
+
 export default class ClientResponse
 {
     readonly ok      : boolean;
@@ -56,7 +58,9 @@ export default class ClientResponse
     {
         const bytes = await this.#bytes();
 
-        if( typeof Buffer !== 'undefined' ){ return Buffer.from( bytes ) }
+        const BufferCtor = getBuffer();
+
+        if( BufferCtor ){ return BufferCtor.from( bytes ) }
 
         return bytes;
     }

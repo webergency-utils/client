@@ -46,7 +46,7 @@ export default class CancelToken
 
     static source(): CancelTokenSource
     {
-        let cancel: ( message?: string ) => void = () => {};
+        let cancel!: ( message?: string ) => void;
         const token = new CancelToken( ( next ) => { cancel = next });
 
         return { token, cancel };

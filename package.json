@@ -8,7 +8,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {},
   "main": "dist/client.cjs",
   "module": "dist/client.js",
   "types": "dist/client.d.ts",
@@ -29,8 +28,12 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "test:bun": "bun --bun ./node_modules/vitest/vitest.mjs run",
     "fuzz": "jazzer fuzz_client.cjs",
     "coverage": "vitest run --coverage",
+    "smoke": "node scripts/runtime-smoke.mjs",
+    "smoke:bun": "bun scripts/runtime-smoke.mjs",
+    "smoke:deno": "deno run --allow-read scripts/runtime-smoke.mjs",
     "clean": "rm -rf ./dist/*",
     "build": "npm run clean && tsup",
     "commit": "node -e \"const version = require('./package.json').version.trim(); require('child_process').execSync('git add . && git commit -m \\\"Version ' + version + '\\\"');\"",
@@ -44,6 +47,7 @@
     "@jazzer.js/core": "^4.0.0",
     "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "happy-dom": "^20.11.2",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"

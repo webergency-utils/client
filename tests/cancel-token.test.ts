@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import CancelToken from '../cancel-token';
-import HttpError from '../error';
+import CancelToken from '../src/cancel-token';
+import HttpError from '../src/error';
 
 describe( 'CancelToken', () =>
 {
@@ -49,5 +49,20 @@ describe( 'CancelToken', () =>
         cancel( 'second' );
 
         expect( token.reason ).toBe( 'first' );
+    });
+
+    it( 'should throw a default message when cancel() had no reason', () =>
+    {
+        const { token, cancel } = CancelToken.source();
+
+        cancel();
+        expect( () => token.throwIfRequested() ).toThrow( 'Request canceled' );
+    });
+
+    it( 'should no-op throwIfRequested before cancel', () =>
+    {
+        const { token } = CancelToken.source();
+
+        expect( () => token.throwIfRequested() ).not.toThrow();
     });
 });

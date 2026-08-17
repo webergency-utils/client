@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import ClientResponse from '../response';
+import ClientResponse from '../src/response';
 
 describe( 'ClientResponse', () =>
 {
@@ -77,5 +77,20 @@ describe( 'ClientResponse', () =>
 
         expect( await res.json() ).toBeUndefined();
         expect( res.data ).toBeUndefined();
+    });
+
+    it( 'should return an empty stream when the Response has no body', () =>
+    {
+        const res = new ClientResponse( new Response( null ));
+
+        expect( res.stream() ).toBeInstanceOf( ReadableStream );
+    });
+
+    it( 'should expose the raw Response', () =>
+    {
+        const raw = new Response( 'x' );
+        const res = new ClientResponse( raw );
+
+        expect( res.raw ).toBe( raw );
     });
 });

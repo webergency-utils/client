@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import CookieJar from '../cookie-jar';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import CookieJar from '../src/cookie-jar';
 
 describe( 'CookieJar', () =>
 {
@@ -70,6 +70,10 @@ describe( 'CookieJar', () =>
         jar.storeFromResponse( 'https://example.com/', headers );
 
         expect( jar.get( 'https://example.com/' ) ).toBe( 'a=1; b=2' );
+
+        const bare = { getSetCookie: undefined } as unknown as Headers;
+
+        jar.storeFromResponse( 'https://example.com/', bare );
     });
 
     it( 'should list stored cookies without scores', () =>
@@ -81,7 +85,7 @@ describe( 'CookieJar', () =>
         expect( listed ).toHaveLength( 1 );
         expect( listed[0].name ).toBe( 'sid' );
         expect( listed[0].value ).toBe( 'abc' );
-        expect( listed[0].samesite ).toBe( 'lax' );
+        expect( listed[0].sameSite ).toBe( 'lax' );
         expect( listed[0] ).not.toHaveProperty( 'score' );
         expect( listed[0] ).not.toHaveProperty( 'sourceSite' );
     });
@@ -91,13 +95,113 @@ describe( 'CookieJar', () =>
         expect( jar.get( 'not-a-url' ) ).toBe( '' );
     });
 
+    it( 'should ignore set() on an invalid URL', () =>
+    {
+        jar.set( 'not-a-url', 'sid=1; Path=/' );
+
+        expect( jar.cookies() ).toHaveLength( 0 );
+    });
+
+    it( 'should store HttpOnly, Expires, and ignore a non-numeric Max-Age', () =>
+    {
+        jar.set( 'https://example.com/', 'sid=1; Path=/; HttpOnly; Max-Age=nope; Expires=Thu, 01 Jan 2099 00:00:00 GMT; Priority=High' );
+
+        expect( jar.cookies()[0].httpOnly ).toBe( true );
+        expect( jar.cookies()[0].expires ).toBeGreaterThan( Date.now() );
+        expect( jar.get( 'https://example.com/' ) ).toBe( 'sid=1' );
+
+        jar.set( 'https://example.com/', 'other=1; Path=/; Expires=not-a-date' );
+
+        expect( jar.cookies().find( c => c.name === 'other' )?.expires ).toBeUndefined();
+    });
+
+    it( 'should drop a cookie on get after Expires has passed', () =>
+    {
+        vi.useFakeTimers();
+        vi.setSystemTime( new Date( '2020-01-01T00:00:00Z' ) );
+
+        jar.set( 'https://example.com/', 'sid=1; Path=/; Expires=Thu, 02 Jan 2020 00:00:00 GMT' );
+
+        expect( jar.get( 'https://example.com/' ) ).toBe( 'sid=1' );
+
+        vi.setSystemTime( new Date( '2020-01-03T00:00:00Z' ) );
+
+        expect( jar.get( 'https://example.com/' ) ).toBe( '' );
+
+        vi.useRealTimers();
+    });
+
+    it( 'should prefer the more specific domain when names collide', () =>
+    {
+        jar.set( 'https://www.example.com/', 'sid=root; Path=/; Domain=example.com' );
+        jar.set( 'https://www.example.com/', 'sid=host; Path=/' );
+
+        expect( jar.get( 'https://www.example.com/' ) ).toBe( 'sid=host' );
+    });
+
+    it( 'should prefer the more specific path when names collide', () =>
+    {
+        jar.set( 'https://example.com/', 'sid=wide; Path=/' );
+        jar.set( 'https://example.com/app', 'sid=narrow; Path=/app' );
+
+        expect( jar.get( 'https://example.com/app/' ) ).toBe( 'sid=narrow' );
+    });
+
+    it( 'should keep a host cookie when a later Domain cookie is less specific', () =>
+    {
+        jar.set( 'https://www.example.com/', 'sid=host; Path=/' );
+        jar.set( 'https://www.example.com/', 'sid=root; Path=/; Domain=example.com' );
+
+        expect( jar.get( 'https://www.example.com/' ) ).toBe( 'sid=host' );
+    });
+
+    it( 'should honor a Domain attribute that already has a leading dot', () =>
+    {
+        jar.set( 'https://www.example.com/', 'sid=1; Path=/; Domain=.example.com' );
+
+        expect( jar.get( 'https://www.example.com/' ) ).toBe( 'sid=1' );
+        expect( jar.get( 'https://other.example.com/' ) ).toBe( 'sid=1' );
+    });
+
+    it( 'should ignore Expires when Max-Age already set the lifetime', () =>
+    {
+        jar.set( 'https://example.com/', 'sid=1; Path=/; Max-Age=100; Expires=Thu, 01 Jan 1970 00:00:00 GMT' );
+
+        expect( jar.cookies()[0].expires ).toBeGreaterThan( Date.now() );
+        expect( jar.get( 'https://example.com/' ) ).toBe( 'sid=1' );
+    });
+
+    it( 'should not send a cookie whose path does not prefix the request', () =>
+    {
+        jar.set( 'https://example.com/app', 'sid=1; Path=/app' );
+
+        expect( jar.get( 'https://example.com/' ) ).toBe( '' );
+        expect( jar.get( 'https://example.com/app/x' ) ).toBe( 'sid=1' );
+    });
+
+    it( 'should skip a sibling host stored under the same registrable domain', () =>
+    {
+        jar.set( 'https://a.example.com/', 'sid=1; Path=/' );
+
+        expect( jar.get( 'https://b.example.com/' ) ).toBe( '' );
+        expect( jar.get( 'https://a.example.com/' ) ).toBe( 'sid=1' );
+    });
+
+    it( 'should treat IPv6 hosts as their own site', () =>
+    {
+        jar.set( 'http://[::1]/', 'sid=1; Path=/; SameSite=Lax' );
+
+        expect( jar.get( 'http://[::1]/' ) ).toBe( 'sid=1' );
+        expect( jar.get( 'https://[::1]/' ) ).toBe( '' );
+    });
+
     describe( 'SameSite', () =>
     {
         it( 'should default an omitted SameSite attribute to Lax', () =>
         {
             jar.set( 'https://example.com/', 'sid=abc; Path=/' );
 
-            expect( jar.cookies()[0].samesite ).toBe( 'lax' );
+            expect( jar.cookies()[0].sameSite ).toBe( 'lax' );
             expect( jar.get( 'https://example.com/' ) ).toBe( 'sid=abc' );
         });
 
@@ -107,7 +211,7 @@ describe( 'CookieJar', () =>
             jar.set( 'https://a.example.com/', 'lax=1; Path=/; SameSite=Lax' );
             jar.set( 'https://a.example.com/', 'none=1; Path=/; SameSite=None; Secure' );
 
-            const modes = jar.cookies().map( c => [ c.name, c.samesite ]);
+            const modes = jar.cookies().map( c => [ c.name, c.sameSite ]);
 
             expect( modes ).toEqual( expect.arrayContaining([
                 [ 'strict', 'strict' ],
@@ -120,7 +224,7 @@ describe( 'CookieJar', () =>
         {
             jar.set( 'https://example.com/', 'sid=1; Path=/; SameSite=weird' );
 
-            expect( jar.cookies()[0].samesite ).toBe( 'lax' );
+            expect( jar.cookies()[0].sameSite ).toBe( 'lax' );
         });
 
         it( 'should reject SameSite=None without Secure', () =>
@@ -135,7 +239,7 @@ describe( 'CookieJar', () =>
         {
             jar.set( 'https://example.com/', 'sid=1; Path=/; SameSite=None; Secure' );
 
-            expect( jar.cookies()[0].samesite ).toBe( 'none' );
+            expect( jar.cookies()[0].sameSite ).toBe( 'none' );
             expect( jar.get( 'https://example.com/' ) ).toBe( 'sid=1' );
         });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { computeRetryDelay, normalizeRetry, retryDelay, shouldRetry } from '../retry';
+import { computeRetryDelay, normalizeRetry, retryDelay, shouldRetry } from '../src/retry';
 
 describe( 'retry', () =>
 {
@@ -56,5 +56,19 @@ describe( 'retry', () =>
         expect( shouldRetry({ attempt: 0, method: 'POST', retry, status: 503 }) ).toBe( false );
         expect( shouldRetry({ attempt: 0, method: 'GET', retry, status: 503 }) ).toBe( true );
         expect( shouldRetry({ attempt: 0, method: 'GET', retry, error: new Error( 'net' ) }) ).toBe( true );
+    });
+
+    it( 'should treat a numeric retry option as a limit', () =>
+    {
+        const retry = normalizeRetry( 3 );
+
+        expect( retry.limit ).toBe( 3 );
+        expect( retry.jitter ).toBe( 0 );
+        expect( retry.methods.has( 'GET' ) ).toBe( true );
+    });
+
+    it( 'should ignore a non-numeric Retry-After that is not a date', () =>
+    {
+        expect( retryDelay( 0, 'nope' ) ).toBe( 250 );
     });
 });

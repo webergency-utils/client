@@ -21,15 +21,15 @@ export type CookieRecord =
     path      : string
     secure?   : boolean
     expires?  : number
-    httponly? : boolean
-    samesite? : SameSite
+    httpOnly? : boolean
+    sameSite? : SameSite
 }
 
 type StoredCookie = CookieRecord &
 {
     score      : { domain: number, path: number }
     sourceSite : string
-    samesite   : SameSite
+    sameSite   : SameSite
 }
 
 type PathMap = DefaultMap<string, Map<string, StoredCookie>>;
@@ -91,30 +91,25 @@ function domainMatch( host: string, cookieDomain: string ): boolean
     return h === d || h.endsWith( '.' + d );
 }
 
-function parseSetCookie( cookie_str: string, url: URL ): StoredCookie | undefined
+function parseSetCookie( cookieStr: string, url: URL ): StoredCookie | undefined
 {
-    const parts = cookie_str.split( /\s*;\s*/ );
-    const first = parts[0]?.match( /^(?<key>[^=]*)=?(?<value>.*)$/ )?.groups;
-
-    if( !first ){ return undefined }
-
+    const parts = cookieStr.split( /\s*;\s*/ );
+    const first = parts[0].match( /^(?<key>[^=]*)=?(?<value>.*)$/ )!.groups!;
+    const pathname = url.pathname.endsWith( '/' ) ? url.pathname : url.pathname + '/';
     const cookie: StoredCookie =
     {
         name       : decodeURIComponent( first.key ),
         value      : decodeURIComponent( first.value ),
         domain     : '.' + url.hostname,
-        path       : ( url.pathname || '/' ).endsWith( '/' ) ? ( url.pathname || '/' ) : ( url.pathname || '/' ) + '/',
+        path       : pathname,
         score      : { domain: 0, path: 0 },
         sourceSite : siteKey( url ),
-        samesite   : 'lax'
+        sameSite   : 'lax'
     };
 
     for( let i = 1; i < parts.length; ++i )
     {
-        const attr = parts[i].match( /^(?<key>[^=]*)=?(?<value>.*)$/ )?.groups;
-
-        if( !attr ){ continue }
-
+        const attr = parts[i].match( /^(?<key>[^=]*)=?(?<value>.*)$/ )!.groups!;
         const key = decodeURIComponent( attr.key ).toLowerCase();
         const val = decodeURIComponent( attr.value );
 
@@ -132,7 +127,7 @@ function parseSetCookie( cookie_str: string, url: URL ): StoredCookie | undefine
         }
         else if( key === 'httponly' )
         {
-            cookie.httponly = true;
+            cookie.httpOnly = true;
         }
         else if( key === 'max-age' )
         {
@@ -154,11 +149,11 @@ function parseSetCookie( cookie_str: string, url: URL ): StoredCookie | undefine
         }
         else if( key === 'samesite' )
         {
-            cookie.samesite = parseSameSite( val );
+            cookie.sameSite = parseSameSite( val );
         }
     }
 
-    if( cookie.samesite === 'none' && !cookie.secure ){ return undefined }
+    if( cookie.sameSite === 'none' && !cookie.secure ){ return undefined }
 
     cookie.score = scoreOf( cookie.domain, cookie.path );
 
@@ -169,7 +164,7 @@ export default class CookieJar
 {
     #domains: RootMap = new DefaultMap();
 
-    set( url: string, cookie_str: string ): void
+    set( url: string, cookieStr: string ): void
     {
         let parsed: URL;
 
@@ -182,7 +177,7 @@ export default class CookieJar
             return;
         }
 
-        const cookie = parseSetCookie( cookie_str, parsed );
+        const cookie = parseSetCookie( cookieStr, parsed );
 
         if( !cookie ){ return }
 
@@ -214,9 +209,9 @@ export default class CookieJar
             ? headers.getSetCookie()
             : [];
 
-        for( const cookie_str of list )
+        for( const cookieStr of list )
         {
-            this.set( url, cookie_str );
+            this.set( url, cookieStr );
         }
     }
 
@@ -260,22 +255,22 @@ export default class CookieJar
         {
             if( !domainMatch( parsed.hostname, subdomain ) ){ continue }
 
-            for( const [ cookie_path, path_cookies ] of paths.entries() )
+            for( const [ cookiePath, pathCookies ] of paths.entries() )
             {
-                if( !path.startsWith( cookie_path ) ){ continue }
+                if( !path.startsWith( cookiePath ) ){ continue }
 
-                for( const cookie of path_cookies.values() )
+                for( const cookie of pathCookies.values() )
                 {
                     if( cookie.expires !== undefined && cookie.expires <= Date.now() )
                     {
-                        path_cookies.delete( cookie.name );
+                        pathCookies.delete( cookie.name );
 
                         continue;
                     }
 
                     if( cookie.secure && parsed.protocol !== 'https:' ){ continue }
 
-                    if( cookie.samesite !== 'none' )
+                    if( cookie.sameSite !== 'none' )
                     {
                         if( cookie.sourceSite !== requestSite ){ continue }
 
@@ -314,8 +309,8 @@ export default class CookieJar
                             path      : cookie.path,
                             secure    : cookie.secure,
                             expires   : cookie.expires,
-                            httponly  : cookie.httponly,
-                            samesite  : cookie.samesite
+                            httpOnly  : cookie.httpOnly,
+                            sameSite  : cookie.sameSite
                         });
                     }
                 }

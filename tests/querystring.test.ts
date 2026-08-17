@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Querystring, { parse, stringify, parseCookies } from '../querystring';
+import Querystring, { parse, stringify, parseCookies } from '../src/querystring';
 
 describe( 'Querystring', () =>
 {
@@ -89,15 +89,15 @@ describe( 'Querystring', () =>
     it( 'should stringify query', () =>
     {
         // Arrange
-        const querystring = stringify({
+        const queryString = stringify({
             bar : true,
             foo : { foo: false, bar: 'foobar' },
             arr : [ 'foo', { foo: 'bar' }, null, 321, undefined, 123.45, undefined ]
         });
 
         // Act / Assert
-        expect( querystring ).toBe( 'bar=1&foo[foo]=0&foo[bar]=foobar&arr[0]=foo&arr[1][foo]=bar&arr[2]&arr[3]=321&arr[5]=123.45' );
-        expect( parse( querystring ) ).toEqual({
+        expect( queryString ).toBe( 'bar=1&foo[foo]=0&foo[bar]=foobar&arr[0]=foo&arr[1][foo]=bar&arr[2]&arr[3]=321&arr[5]=123.45' );
+        expect( parse( queryString ) ).toEqual({
             bar : '1',
             foo : { foo: '0', bar: 'foobar' },
             arr : [ 'foo', { foo: 'bar' }, null, '321', , '123.45' ]
@@ -124,5 +124,27 @@ describe( 'Querystring', () =>
         expect( Querystring.stringify({ a: 1 }) ).toBe( 'a=1' );
         expect( Querystring.parse( 'a=1' ) ).toEqual({ a: '1' });
         expect( Querystring.parseCookies( 'a=1' ) ).toEqual({ a: '1' });
+    });
+
+    it( 'should skip inherited enumerable keys when stringifying', () =>
+    {
+        const data = Object.create({ inherited: 1 });
+
+        data.own = 2;
+
+        expect( stringify( data ) ).toBe( 'own=2' );
+    });
+
+    it( 'should skip function and symbol values when stringifying', () =>
+    {
+        expect( stringify({ fn: () => 1, s: Symbol( 'x' ) }) ).toBe( '' );
+    });
+
+    it( 'should attach a scalar onto an object sibling of a numeric key', () =>
+    {
+        expect( parse( '0=x&foo[bar]=a&foo=b' ) ).toEqual({
+            0   : 'x',
+            foo : { bar: 'a', '1': 'b' }
+        });
     });
 });

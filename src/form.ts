@@ -1,14 +1,10 @@
 import { stringify } from './querystring';
+import { isBuffer } from './runtime';
 
 export type EncodedBody =
 {
     body    : BodyInit | undefined
     headers : Record<string, string>
-}
-
-function isBuffer( value: unknown ): value is Buffer
-{
-    return typeof Buffer !== 'undefined' && Buffer.isBuffer( value );
 }
 
 function isBlobLike( value: unknown ): value is Blob
@@ -124,7 +120,6 @@ export function encodeRequestBody( input:
 
 function stringifyValue( value: unknown ): string
 {
-    if( typeof value === 'string' ){ return value }
     if( typeof value === 'number' || typeof value === 'boolean' ){ return String( value ) }
     if( value === null ){ return '' }
 

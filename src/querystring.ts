@@ -12,30 +12,30 @@ export type QueryParseOptions =
 
 type QueryRecord = Record<string | number, unknown>
 
-function expand( data: unknown, querystring: string[] = [], prefix = '' ): string[]
+function expand( data: unknown, pairs: string[] = [], prefix = '' ): string[]
 {
     if( data === undefined )
     {
-        return querystring;
+        return pairs;
     }
 
     if( data === null )
     {
-        querystring.push( prefix );
+        pairs.push( prefix );
     }
     else if( typeof data === 'boolean' )
     {
-        querystring.push( prefix + '=' + ( data ? '1' : '0' ));
+        pairs.push( prefix + '=' + ( data ? '1' : '0' ));
     }
     else if( typeof data === 'number' || typeof data === 'string' )
     {
-        querystring.push( prefix + '=' + encodeURIComponent( data.toString() ));
+        pairs.push( prefix + '=' + encodeURIComponent( data.toString() ));
     }
     else if( Array.isArray( data ))
     {
         for( let i = 0; i < data.length; ++i )
         {
-            expand( data[i], querystring, prefix + '[' + i + ']' );
+            expand( data[i], pairs, prefix + '[' + i + ']' );
         }
     }
     else if( typeof data === 'object' )
@@ -46,13 +46,13 @@ function expand( data: unknown, querystring: string[] = [], prefix = '' ): strin
 
             expand(
                 ( data as Record<string, unknown> )[key],
-                querystring,
+                pairs,
                 prefix ? prefix + '[' + key + ']' : key
             );
         }
     }
 
-    return querystring;
+    return pairs;
 }
 
 function typedValue( value: string, types: QueryType[] = [] ): unknown
@@ -79,7 +79,7 @@ function createQuery(): QueryRecord
             const keys = key.replace( /\]\[/g, '[' ).replace( /]$/, '' ).split( '[' );
             let obj: any = query;
             let parent: any;
-            let parent_key: string | number | undefined;
+            let parentKey: string | number | undefined;
             let parsed = types ? typedValue( value as string, types ) : value;
 
             for( let i = 0; i < keys.length; ++i )
@@ -104,7 +104,7 @@ function createQuery(): QueryRecord
 
                 if( typeof k === 'string' && Array.isArray( obj ) )
                 {
-                    parent[parent_key!] = obj = obj.reduce(( o: Record<string, unknown>, v: unknown, idx: number ) =>
+                    parent[parentKey!] = obj = obj.reduce(( o: Record<string, unknown>, v: unknown, idx: number ) =>
                     {
                         o[idx] = v;
 
@@ -120,7 +120,7 @@ function createQuery(): QueryRecord
                     }
 
                     parent = obj;
-                    parent_key = k;
+                    parentKey = k;
                     obj = obj[k];
                 }
                 else
@@ -157,71 +157,71 @@ export function stringify( data: unknown ): string
     return expand( data ).join( '&' );
 }
 
-export function parse( querystring: string, options: QueryParseOptions = {} ): Record<string, unknown>
+export function parse( queryString: string, options: QueryParseOptions = {} ): Record<string, unknown>
 {
     const data = createQuery() as any;
-    let last_pair = 0;
+    let lastPair = 0;
 
     do
     {
-        let pair = querystring.indexOf( SEP, last_pair );
+        let pair = queryString.indexOf( SEP, lastPair );
 
-        if( pair === -1 ){ pair = querystring.length }
+        if( pair === -1 ){ pair = queryString.length }
 
-        if( pair - last_pair > 1 )
+        if( pair - lastPair > 1 )
         {
-            const value = querystring.indexOf( EQ, last_pair );
+            const value = queryString.indexOf( EQ, lastPair );
 
             if( value !== -1 && value < pair )
             {
                 data.assign(
-                    decodeURIComponent( querystring.substring( last_pair, value ).replace( /\+/g, ' ' )),
-                    decodeURIComponent( querystring.substring( value + 1, pair ).replace( /\+/g, ' ' )),
+                    decodeURIComponent( queryString.substring( lastPair, value ).replace( /\+/g, ' ' )),
+                    decodeURIComponent( queryString.substring( value + 1, pair ).replace( /\+/g, ' ' )),
                     options.types
                 );
             }
             else
             {
-                data.assign( decodeURIComponent( querystring.substring( last_pair, pair ).replace( /\+/g, ' ' )), null );
+                data.assign( decodeURIComponent( queryString.substring( lastPair, pair ).replace( /\+/g, ' ' )), null );
             }
         }
 
-        last_pair = pair + 1;
+        lastPair = pair + 1;
     }
-    while( last_pair < querystring.length );
+    while( lastPair < queryString.length );
 
     return data;
 }
 
-export function parseCookies( cookiestring?: string | null ): Record<string, string>
+export function parseCookies( cookieString?: string | null ): Record<string, string>
 {
     const cookies: Record<string, string> = {};
-    let last_pair = 0;
+    let lastPair = 0;
 
-    if( !cookiestring ){ return cookies }
+    if( !cookieString ){ return cookies }
 
     do
     {
-        let pair = cookiestring.indexOf( DEL, last_pair );
+        let pair = cookieString.indexOf( DEL, lastPair );
 
-        if( pair === -1 ){ pair = cookiestring.length }
+        if( pair === -1 ){ pair = cookieString.length }
 
-        if( pair - last_pair > 1 )
+        if( pair - lastPair > 1 )
         {
-            const value = cookiestring.indexOf( EQ, last_pair );
+            const value = cookieString.indexOf( EQ, lastPair );
 
             if( value !== -1 && value < pair )
             {
-                const key = decodeURIComponent( cookiestring.substring( last_pair, value ).trim() );
-                const val = decodeURIComponent( cookiestring.substring( value + 1, pair ).trim() );
+                const key = decodeURIComponent( cookieString.substring( lastPair, value ).trim() );
+                const val = decodeURIComponent( cookieString.substring( value + 1, pair ).trim() );
 
                 cookies[key] = val;
             }
         }
 
-        last_pair = pair + 1;
+        lastPair = pair + 1;
     }
-    while( last_pair < cookiestring.length );
+    while( lastPair < cookieString.length );
 
     return cookies;
 }

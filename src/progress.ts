@@ -1,3 +1,5 @@
+import { isBuffer } from './runtime';
+
 export type ProgressEvent =
 {
     loaded           : number
@@ -9,6 +11,11 @@ export type ProgressEvent =
 export type ProgressHandler = ( event: ProgressEvent ) => void;
 
 const CHUNK = 64 * 1024;
+
+function mediaType( type: string ): string | undefined
+{
+    return type || undefined;
+}
 
 export function progressEvent( loaded: number, total?: number ): ProgressEvent
 {
@@ -121,7 +128,7 @@ export async function applyUploadProgress( body: BodyInit, onProgress: ProgressH
         return { body: streamFromBytes( new TextEncoder().encode( body ), onProgress ) };
     }
 
-    if( typeof Buffer !== 'undefined' && Buffer.isBuffer( body ) )
+    if( isBuffer( body ) )
     {
         return { body: streamFromBytes( body, onProgress ) };
     }
@@ -138,14 +145,14 @@ export async function applyUploadProgress( body: BodyInit, onProgress: ProgressH
 
     if( typeof Blob !== 'undefined' && body instanceof Blob )
     {
-        return { body: streamFromBytes( new Uint8Array( await body.arrayBuffer() ), onProgress ), contentType: body.type || undefined };
+        return { body: streamFromBytes( new Uint8Array( await body.arrayBuffer() ), onProgress ), contentType: mediaType( body.type ) };
     }
 
     if( typeof FormData !== 'undefined' && body instanceof FormData )
     {
         const blob = await new Response( body ).blob();
 
-        return { body: streamFromBytes( new Uint8Array( await blob.arrayBuffer() ), onProgress ), contentType: blob.type || undefined };
+        return { body: streamFromBytes( new Uint8Array( await blob.arrayBuffer() ), onProgress ), contentType: mediaType( blob.type ) };
     }
 
     if( typeof ReadableStream !== 'undefined' && body instanceof ReadableStream )
