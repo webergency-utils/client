@@ -1,6 +1,6 @@
 {
   "name": "@webergency-utils/client",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "sideEffects": false,
   "description": "A fetch-based HTTP client with instance defaults, nested querystrings, form encoding, an opt-in cookie jar, and typed HTTP errors.",
