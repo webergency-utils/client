@@ -32,4 +32,4 @@ jobs:
         run: npm run build
 
       - name: Run fuzzer
-        run: npx jazzer fuzz_client.cjs --sync -- -runs=10000 -max_total_time=300
+        run: npx jazzer fuzz_client.cjs --sync -- -runs=10000 -max_total_time=300 -rss_limit_mb=4096
