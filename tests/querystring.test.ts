@@ -175,6 +175,7 @@ describe( 'Querystring', () =>
         const parsed = parse( '__proto__[polluted]=yes&constructor[prototype][polluted]=yes&a[prototype][b]=1&assign=ok&toString=str&a[][hasOwnProperty]=1&a[][hasOwnProperty]=2' );
 
         expect(({} as Record<string, unknown> ).polluted ).toBeUndefined();
+        expect( Object.getPrototypeOf( parsed )).toBeNull();
         expect( parsed ).toEqual({
             assign   : 'ok',
             toString : 'str',

@@ -173,14 +173,14 @@ function assignQuery( query: QueryRecord, key: string, value: unknown, types?: Q
                 o[idx] = v;
 
                 return o;
-            }, {});
+            }, Object.create( null ));
         }
 
         if( i < keys.length - 1 )
         {
             if( !hasOwn( obj, k ) || typeof obj[k] !== 'object' || obj[k] === null )
             {
-                obj[k] = ( keys[i + 1] === '' || isArrayIndex( keys[i + 1])) ? [] : {};
+                obj[k] = ( keys[i + 1] === '' || isArrayIndex( keys[i + 1])) ? [] : Object.create( null );
             }
 
             parent = obj;
@@ -219,7 +219,7 @@ export function stringify( data: unknown ): string
 
 export function parse( queryString: string, options: QueryParseOptions = {}): Record<string, unknown>
 {
-    const data: Record<string, unknown> = {};
+    const data: Record<string, unknown> = Object.create( null );
     let lastPair = 0;
 
     do

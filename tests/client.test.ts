@@ -20,6 +20,8 @@ describe( 'Client', () =>
     {
         expect( resolveUrl( 'https://api.example.com/v1', 'users' )).toBe( 'https://api.example.com/v1/users' );
         expect( resolveUrl( 'https://api.example.com/v1/', '/users' )).toBe( 'https://api.example.com/v1/users' );
+        expect( resolveUrl( 'https://api.example.com/v1?foo=bar', 'users' )).toBe( 'https://api.example.com/v1/users' );
+        expect( resolveUrl( 'https://api.example.com/v1///', 'users' )).toBe( 'https://api.example.com/v1/users' );
         expect( resolveUrl( undefined, 'https://other.example/x' )).toBe( 'https://other.example/x' );
     });
 

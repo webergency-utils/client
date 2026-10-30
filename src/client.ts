@@ -194,7 +194,15 @@ function parseWebroot( webroot: string ): { base : string, origin : string }
         return lastWebrootVal;
     }
 
-    const base = ( webroot.replace( /\?.*$/, '' ).replace( /\/+$/, '' ) + '/' );
+    const queryIndex = webroot.indexOf( '?' );
+    let trimmed = queryIndex === -1 ? webroot : webroot.slice( 0, queryIndex );
+
+    while( trimmed.endsWith( '/' ))
+    {
+        trimmed = trimmed.slice( 0, -1 );
+    }
+
+    const base = trimmed + '/';
     lastWebrootKey = webroot;
     lastWebrootVal = { base, origin : new URL( base ).origin };
 
