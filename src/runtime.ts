@@ -1,12 +1,12 @@
 export type BufferCtor =
-{
-    isBuffer?( value: unknown ): boolean
-    from( data: Uint8Array ): Uint8Array
-}
+    {
+        isBuffer?( value: unknown ): boolean
+        from( data: Uint8Array ): Uint8Array
+    };
 
 export function getBuffer(): BufferCtor | undefined
 {
-    return ( globalThis as { Buffer?: BufferCtor }).Buffer;
+    return ( globalThis as { Buffer? : BufferCtor }).Buffer;
 }
 
 export function isBuffer( value: unknown ): value is Uint8Array

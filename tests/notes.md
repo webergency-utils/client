@@ -24,7 +24,8 @@
 - Keep retry tests fast with `retry: { delay: () => 0 }`. Mock `Math.random` only in `retry.test.ts` via the `random` argument of `computeRetryDelay`.
 - Progress handlers fire when the mock `fetch` consumes `Request` body (`input.text()`) or when the test reads the `ClientResponse` body.
 - `CancelToken.source()` — cancel before the call to assert fetch is skipped; cancel from the mock to abort in-flight.
-- CookieJar SameSite: unspecified defaults to Lax; `None` without `Secure` is not stored. `get(url, initiator)` treats an omitted/invalid initiator as first-party. `Client` passes the original request URL (not the previous hop) as initiator so Lax cookies survive login round-trips and are omitted on cross-site hops.
+- CookieJar SameSite & Domain: unspecified SameSite defaults to Lax; `None` without `Secure` is not stored. Cookies without a `Domain` attribute set `hostOnly: true` (exact host match only); `Domain=` cookies set `hostOnly: false` and match subdomains while rejecting single-label and multi-part TLD public suffixes. `get(url, initiator, previousUrl)` treats an omitted/invalid initiator as first-party; `Strict` additionally checks `previousUrl` so cross-site redirect hops back to the origin withhold `Strict` cookies while allowing `Lax`.
+- `resolveUrl(webroot, path)` strips all leading `/` and `\` characters from relative paths and throws `TypeError` if the resolved origin does not match `webroot`'s origin.
 - JSON auto-parse: `application/json` and `*+json` fill `res.data` before the promise resolves. `responseType: 'json'` forces parse; `responseType: 'stream'` skips it so `stream()` is unread.
 - Do not `vi.stubGlobal('Buffer', undefined)` or delete `globalThis.Buffer` — Vitest internals use `Buffer.concat`. Cover the Buffer-absent path by mocking `getBuffer` from `src/runtime.ts` in `no-buffer.test.ts`.
 - `buffer()` returns `Buffer.from(bytes)` when `getBuffer()` is defined, otherwise the `Uint8Array`.

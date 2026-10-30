@@ -2,66 +2,132 @@ class DefaultMap<K, V> extends Map<K, V>
 {
     get( key: K, factory?: () => V ): V | undefined
     {
-        if( factory && !this.has( key ) )
+        if( factory && !this.has( key ))
         {
-            this.set( key, factory() );
+            this.set( key, factory());
         }
 
         return super.get( key );
     }
 }
 
-export type SameSite = 'strict' | 'lax' | 'none'
+export type SameSite = 'strict' | 'lax' | 'none';
 
 export type CookieRecord =
-{
-    name      : string
-    value     : string
-    domain    : string
-    path      : string
-    secure?   : boolean
-    expires?  : number
-    httpOnly? : boolean
-    sameSite? : SameSite
-}
+    {
+        name      : string
+        value     : string
+        domain    : string
+        path      : string
+        secure?   : boolean
+        expires?  : number
+        httpOnly? : boolean
+        sameSite? : SameSite
+    };
 
 type StoredCookie = CookieRecord &
 {
-    score      : { domain: number, path: number }
-    sourceSite : string
-    sameSite   : SameSite
-}
+    score       : { domain : number, path : number }
+    sourceSite  : string
+    sameSite    : SameSite
+    hostOnly    : boolean
+    cleanDomain : string
+    encoded     : string
+};
 
 type PathMap = DefaultMap<string, Map<string, StoredCookie>>;
 type DomainMap = DefaultMap<string, PathMap>;
 type RootMap = DefaultMap<string, DomainMap>;
 
-function root( domain: string ): string
+const MULTI_PART_TLD_RE = /^(?:co|org|gov|ac|net|edu|or|ne|com)\.[a-z]{2}$/i;
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+const DOT_CHAR = 46;
+const SLASH_CHAR = 47;
+
+function safeDecode( value: string ): string
 {
-    return domain.replace( /^.*?([^.]+\.(co\.uk|[^.]+))$/, '$1' );
+    if( !value.includes( '%' )){ return value }
+
+    try
+    {
+        return decodeURIComponent( value );
+    }
+    catch
+    {
+        return value;
+    }
 }
 
-function scoreOf( domain: string, path: string )
+function cleanHost( domain: string ): string
+{
+    const lower = domain.toLowerCase();
+
+    return lower.charCodeAt( 0 ) === DOT_CHAR ? lower.replace( /^\.+/, '' ) : lower;
+}
+
+function isPublicSuffix( domain: string ): boolean
+{
+    const clean = cleanHost( domain );
+
+    if( !clean.includes( '.' )){ return true }
+
+    return MULTI_PART_TLD_RE.test( clean );
+}
+
+function root( domain: string ): string
+{
+    const clean = cleanHost( domain );
+    const lastDot = clean.lastIndexOf( '.' );
+
+    if( lastDot === -1 ){ return clean }
+
+    const secondLastDot = clean.lastIndexOf( '.', lastDot - 1 );
+
+    if( secondLastDot === -1 ){ return clean }
+
+    const lastTwo = clean.slice( secondLastDot + 1 );
+
+    if( MULTI_PART_TLD_RE.test( lastTwo ))
+    {
+        const thirdLastDot = clean.lastIndexOf( '.', secondLastDot - 1 );
+
+        return thirdLastDot === -1 ? clean : clean.slice( thirdLastDot + 1 );
+    }
+
+    return lastTwo;
+}
+
+function countChar( value: string, charCode: number ): number
+{
+    let count = 0;
+
+    for( let i = 0; i < value.length; ++i )
+    {
+        if( value.charCodeAt( i ) === charCode ){ count += 1 }
+    }
+
+    return count;
+}
+
+function scoreOf( domain: string, path: string, hostOnly: boolean )
 {
     return {
-        domain : domain.replace( /[^.]/g, '' ).length,
-        path   : path.replace( /[^/]/g, '' ).length
+        domain : countChar( domain, DOT_CHAR ) + ( hostOnly ? 0.5 : 0 ),
+        path   : countChar( path, SLASH_CHAR )
     };
 }
 
-function overridesCookie( cur: StoredCookie, old?: StoredCookie ): boolean
+function overridesCookie( cur: StoredCookie, old: StoredCookie ): boolean
 {
-    if( !old?.score ){ return true }
-
     return cur.score.domain > old.score.domain
         || ( cur.score.domain === old.score.domain && cur.score.path > old.score.path );
 }
 
 function isIpHostname( host: string ): boolean
 {
-    if( host.startsWith( '[' ) || host.includes( ':' ) ){ return true }
+    if( host.startsWith( '[' ) || host.includes( ':' )){ return true }
 
-    return /^(?:\d{1,3}\.){3}\d{1,3}$/.test( host );
+    return IPV4_RE.test( host );
 }
 
 function siteKey( url: URL ): string
@@ -86,36 +152,71 @@ function parseSameSite( value: string ): SameSite
 function domainMatch( host: string, cookieDomain: string ): boolean
 {
     const h = host.toLowerCase();
-    const d = cookieDomain.replace( /^\./, '' ).toLowerCase();
+    const d = cleanHost( cookieDomain );
 
     return h === d || h.endsWith( '.' + d );
 }
 
+function parseOptionalUrl( raw?: string ): URL | undefined
+{
+    if( !raw ){ return undefined }
+
+    try
+    {
+        return new URL( raw );
+    }
+    catch
+    {
+        return undefined;
+    }
+}
+
 function parseSetCookie( cookieStr: string, url: URL ): StoredCookie | undefined
 {
-    const parts = cookieStr.split( /\s*;\s*/ );
-    const first = parts[0].match( /^(?<key>[^=]*)=?(?<value>.*)$/ )!.groups!;
+    const parts = cookieStr.split( ';' );
+    const eqIdx = parts[0].indexOf( '=' );
+
+    if( eqIdx <= 0 ){ return undefined }
+
+    const rawName = parts[0].slice( 0, eqIdx ).trim();
+    const rawValue = parts[0].slice( eqIdx + 1 ).trim();
+
+    if( !rawName ){ return undefined }
+
+    const host = url.hostname.toLowerCase();
     const pathname = url.pathname.endsWith( '/' ) ? url.pathname : url.pathname + '/';
+    const name = safeDecode( rawName );
+    const value = safeDecode( rawValue );
     const cookie: StoredCookie =
     {
-        name       : decodeURIComponent( first.key ),
-        value      : decodeURIComponent( first.value ),
-        domain     : '.' + url.hostname,
-        path       : pathname,
-        score      : { domain: 0, path: 0 },
-        sourceSite : siteKey( url ),
-        sameSite   : 'lax'
+        name,
+        value,
+        domain      : '.' + host,
+        path        : pathname,
+        score       : { domain : 0, path : 0 },
+        sourceSite  : siteKey( url ),
+        sameSite    : 'lax',
+        hostOnly    : true,
+        cleanDomain : host,
+        encoded     : encodeURIComponent( name ) + '=' + encodeURIComponent( value )
     };
 
     for( let i = 1; i < parts.length; ++i )
     {
-        const attr = parts[i].match( /^(?<key>[^=]*)=?(?<value>.*)$/ )!.groups!;
-        const key = decodeURIComponent( attr.key ).toLowerCase();
-        const val = decodeURIComponent( attr.value );
+        const attrEq = parts[i].indexOf( '=' );
+        const key = ( attrEq === -1 ? parts[i] : parts[i].slice( 0, attrEq )).trim().toLowerCase();
+        const val = attrEq === -1 ? '' : parts[i].slice( attrEq + 1 ).trim();
 
         if( key === 'domain' && val )
         {
-            cookie.domain = val.startsWith( '.' ) ? val : '.' + val;
+            const normalized = cleanHost( val );
+
+            if( normalized )
+            {
+                cookie.domain = '.' + normalized;
+                cookie.cleanDomain = normalized;
+                cookie.hostOnly = false;
+            }
         }
         else if( key === 'path' && val )
         {
@@ -133,7 +234,7 @@ function parseSetCookie( cookieStr: string, url: URL ): StoredCookie | undefined
         {
             const seconds = parseInt( val, 10 );
 
-            if( !Number.isNaN( seconds ) )
+            if( !Number.isNaN( seconds ))
             {
                 cookie.expires = Date.now() + 1000 * seconds;
             }
@@ -155,14 +256,14 @@ function parseSetCookie( cookieStr: string, url: URL ): StoredCookie | undefined
 
     if( cookie.sameSite === 'none' && !cookie.secure ){ return undefined }
 
-    cookie.score = scoreOf( cookie.domain, cookie.path );
+    cookie.score = scoreOf( cookie.domain, cookie.path, cookie.hostOnly );
 
     return cookie;
 }
 
 export default class CookieJar
 {
-    #domains: RootMap = new DefaultMap();
+    #domains : RootMap = new DefaultMap();
 
     set( url: string, cookieStr: string ): void
     {
@@ -181,17 +282,22 @@ export default class CookieJar
 
         if( !cookie ){ return }
 
-        if( !domainMatch( parsed.hostname, cookie.domain ) )
+        const host = parsed.hostname.toLowerCase();
+
+        if( !cookie.hostOnly && ( !domainMatch( host, cookie.domain ) || isPublicSuffix( cookie.domain ) || isIpHostname( host )))
         {
-            cookie.domain = '.' + parsed.hostname;
-            cookie.score = scoreOf( cookie.domain, cookie.path );
+            cookie.domain = '.' + host;
+            cookie.cleanDomain = host;
+            cookie.hostOnly = true;
+            cookie.score = scoreOf( cookie.domain, cookie.path, true );
         }
 
         const expired = cookie.expires !== undefined && cookie.expires <= Date.now();
         const deleted = !cookie.value || cookie.value === 'deleted' || expired;
-        const rootMap = this.#domains.get( root( cookie.domain ), () => new DefaultMap() )!;
-        const domainMap = rootMap.get( cookie.domain, () => new DefaultMap() )!;
-        const pathMap = domainMap.get( cookie.path, () => new Map() )!;
+        const domainKey = cookie.hostOnly ? host : cookie.domain;
+        const rootMap = this.#domains.get( root( cookie.domain ), () => new DefaultMap())!;
+        const domainMap = rootMap.get( domainKey, () => new DefaultMap())!;
+        const pathMap = domainMap.get( cookie.path, () => new Map())!;
 
         if( deleted )
         {
@@ -215,7 +321,7 @@ export default class CookieJar
         }
     }
 
-    get( url: string, initiator?: string ): string
+    get( url: string, initiator?: string, previousUrl?: string ): string
     {
         let parsed: URL;
 
@@ -228,40 +334,34 @@ export default class CookieJar
             return '';
         }
 
-        let initiatorUrl: URL | undefined;
-
-        if( initiator )
-        {
-            try
-            {
-                initiatorUrl = new URL( initiator );
-            }
-            catch
-            {
-                initiatorUrl = undefined;
-            }
-        }
-
-        const requestSite = siteKey( parsed );
-        const firstParty = !initiatorUrl || siteKey( initiatorUrl ) === requestSite;
-        const jar = new Map<string, StoredCookie>();
-        const domain = '.' + parsed.hostname;
-        const path = ( parsed.pathname.replace( /\/+$/, '' ) || '' ) + '/';
-        const cookies = this.#domains.get( root( domain ));
+        const host = parsed.hostname.toLowerCase();
+        const hostRoot = root( host );
+        const cookies = this.#domains.get( hostRoot );
 
         if( !cookies ){ return '' }
 
-        for( const [ subdomain, paths ] of cookies.entries() )
+        const initiatorUrl = parseOptionalUrl( initiator );
+        const previousParsed = parseOptionalUrl( previousUrl );
+        const requestSite = parsed.protocol + '//' + ( isIpHostname( host ) ? host : hostRoot );
+        const firstParty = !initiatorUrl || siteKey( initiatorUrl ) === requestSite;
+        const directParty = !previousParsed || siteKey( previousParsed ) === requestSite;
+        const jar = new Map<string, StoredCookie>();
+        const path = ( parsed.pathname.replace( /\/+$/, '' ) || '' ) + '/';
+        const now = Date.now();
+
+        for( const [ subdomain, paths ] of cookies.entries())
         {
-            if( !domainMatch( parsed.hostname, subdomain ) ){ continue }
+            if( !domainMatch( host, subdomain )){ continue }
 
-            for( const [ cookiePath, pathCookies ] of paths.entries() )
+            for( const [ cookiePath, pathCookies ] of paths.entries())
             {
-                if( !path.startsWith( cookiePath ) ){ continue }
+                if( !path.startsWith( cookiePath )){ continue }
 
-                for( const cookie of pathCookies.values() )
+                for( const cookie of pathCookies.values())
                 {
-                    if( cookie.expires !== undefined && cookie.expires <= Date.now() )
+                    if( cookie.hostOnly && host !== cookie.cleanDomain ){ continue }
+
+                    if( cookie.expires !== undefined && cookie.expires <= now )
                     {
                         pathCookies.delete( cookie.name );
 
@@ -275,11 +375,13 @@ export default class CookieJar
                         if( cookie.sourceSite !== requestSite ){ continue }
 
                         if( !firstParty ){ continue }
+
+                        if( cookie.sameSite === 'strict' && !directParty ){ continue }
                     }
 
                     const old = jar.get( cookie.name );
 
-                    if( overridesCookie( cookie, old ) )
+                    if( !old || overridesCookie( cookie, old ))
                     {
                         jar.set( cookie.name, cookie );
                     }
@@ -287,30 +389,37 @@ export default class CookieJar
             }
         }
 
-        return [ ...jar.values() ].map( c => encodeURIComponent( c.name ) + '=' + encodeURIComponent( c.value ) ).join( '; ' );
+        let result = '';
+
+        for( const cookie of jar.values())
+        {
+            result = result ? result + '; ' + cookie.encoded : cookie.encoded;
+        }
+
+        return result;
     }
 
     cookies(): CookieRecord[]
     {
         const list: CookieRecord[] = [];
 
-        for( const rootMap of this.#domains.values() )
+        for( const rootMap of this.#domains.values())
         {
-            for( const domain of rootMap.values() )
+            for( const domain of rootMap.values())
             {
-                for( const path of domain.values() )
+                for( const path of domain.values())
                 {
-                    for( const cookie of path.values() )
+                    for( const cookie of path.values())
                     {
                         list.push({
-                            name      : cookie.name,
-                            value     : cookie.value,
-                            domain    : cookie.domain,
-                            path      : cookie.path,
-                            secure    : cookie.secure,
-                            expires   : cookie.expires,
-                            httpOnly  : cookie.httpOnly,
-                            sameSite  : cookie.sameSite
+                            name     : cookie.name,
+                            value    : cookie.value,
+                            domain   : cookie.domain,
+                            path     : cookie.path,
+                            secure   : cookie.secure,
+                            expires  : cookie.expires,
+                            httpOnly : cookie.httpOnly,
+                            sameSite : cookie.sameSite
                         });
                     }
                 }

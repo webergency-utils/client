@@ -1,5 +1,7 @@
 import { getBuffer } from './runtime';
 
+const TEXT_DECODER = new TextDecoder();
+
 export default class ClientResponse
 {
     readonly ok      : boolean;
@@ -8,9 +10,10 @@ export default class ClientResponse
     readonly url     : string;
     data             : unknown | undefined;
 
-    #response   : Response;
-    #buffer     : Uint8Array | undefined;
-    #parsedJson : { value: unknown } | undefined;
+    #response     : Response;
+    #buffer       : Uint8Array | undefined;
+    #bytesPromise : Promise<Uint8Array> | undefined;
+    #parsedJson   : { value : unknown } | undefined;
 
     constructor( response: Response )
     {
@@ -30,7 +33,14 @@ export default class ClientResponse
     {
         if( !this.#buffer )
         {
-            this.#buffer = new Uint8Array( await this.#response.arrayBuffer() );
+            this.#bytesPromise ??= this.#response.arrayBuffer().then( ab =>
+            {
+                this.#buffer = new Uint8Array( ab );
+
+                return this.#buffer;
+            });
+
+            return this.#bytesPromise;
         }
 
         return this.#buffer;
@@ -40,9 +50,9 @@ export default class ClientResponse
     {
         if( !this.#parsedJson )
         {
-            const text = new TextDecoder().decode( await this.#bytes() );
+            const text = TEXT_DECODER.decode( await this.#bytes());
 
-            this.#parsedJson = { value: text ? JSON.parse( text ) : undefined };
+            this.#parsedJson = { value : text ? JSON.parse( text ) : undefined };
             this.data = this.#parsedJson.value;
         }
 
@@ -51,7 +61,7 @@ export default class ClientResponse
 
     async text(): Promise<string>
     {
-        return new TextDecoder().decode( await this.#bytes() );
+        return TEXT_DECODER.decode( await this.#bytes());
     }
 
     async buffer(): Promise<Uint8Array>
@@ -80,6 +90,11 @@ export default class ClientResponse
             });
         }
 
-        return this.#response.body ?? new ReadableStream();
+        return this.#response.body ?? new ReadableStream({
+            start( controller )
+            {
+                controller.close();
+            }
+        });
     }
 }

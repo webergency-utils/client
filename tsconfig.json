@@ -1,26 +1,26 @@
 {
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "tests"],
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
+    "rootDir": "./src",
+    "outDir": "./dist",
     "declaration": true,
-    "declarationDir": "dist",
+    "declarationDir": "./dist",
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "lib": ["esnext","dom"],
+    "lib": ["esnext", "dom"],
+    "types": ["node"],
     "module": "esnext",
     "target": "esnext",
     "moduleResolution": "bundler",
-    "declarationMap": true,
     "allowSyntheticDefaultImports": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "pretty": true
-  }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "coverage", "tests/**/*"]
 }

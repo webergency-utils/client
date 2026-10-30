@@ -2,10 +2,10 @@ import { stringify } from './querystring';
 import { isBuffer } from './runtime';
 
 export type EncodedBody =
-{
-    body    : BodyInit | undefined
-    headers : Record<string, string>
-}
+    {
+        body    : BodyInit | undefined
+        headers : Record<string, string>
+    };
 
 function isBlobLike( value: unknown ): value is Blob
 {
@@ -26,7 +26,7 @@ export function isNodeReadable( value: unknown ): boolean
 {
     if( !value || typeof value !== 'object' ){ return false }
 
-    const stream = value as { pipe?: unknown, read?: unknown, readable?: unknown, _readableState?: unknown };
+    const stream = value as { pipe? : unknown, read? : unknown, readable? : unknown, _readableState? : unknown };
 
     if( typeof stream.pipe !== 'function' ){ return false }
 
@@ -45,9 +45,9 @@ function isUrlEncoded( headers: Record<string, string> ): boolean
 
 function toBlobPart( value: Blob | Buffer | ArrayBuffer | Uint8Array | File ): Blob
 {
-    if( isBlobLike( value ) ){ return value }
+    if( isBlobLike( value )){ return value }
 
-    return new Blob( [ value as BlobPart ] );
+    return new Blob([ value as BlobPart ]);
 }
 
 export function encodeRequestBody( input:
@@ -64,7 +64,7 @@ export function encodeRequestBody( input:
     {
         const fd = new FormData();
 
-        for( const [ key, value ] of Object.entries( input.multipart ) )
+        for( const [ key, value ] of Object.entries( input.multipart ))
         {
             if( value === undefined ){ continue }
 
@@ -77,50 +77,51 @@ export function encodeRequestBody( input:
             }
             else
             {
-                fd.append( key, typeof value === 'string' ? value : stringifyValue( value ) );
+                fd.append( key, typeof value === 'string' ? value : stringifyValue( value ));
             }
         }
 
         delete headers['content-type'];
 
-        return { body: fd, headers };
+        return { body : fd, headers };
     }
 
     if( input.form )
     {
         headers['content-type'] = 'application/x-www-form-urlencoded';
 
-        return { body: stringify( input.form ), headers };
+        return { body : stringify( input.form ), headers };
     }
 
     const body = input.body;
 
     if( body === undefined || body === null )
     {
-        return { body: undefined, headers };
+        return { body : undefined, headers };
     }
 
     if( typeof body === 'string' || isBuffer( body ) || isBlobLike( body ) || isFormData( body ) || isReadableStream( body ) || isNodeReadable( body ) || body instanceof ArrayBuffer || body instanceof Uint8Array )
     {
-        return { body: body as BodyInit, headers };
+        return { body : body as BodyInit, headers };
     }
 
-    if( isUrlEncoded( headers ) )
+    if( isUrlEncoded( headers ))
     {
-        return { body: stringify( body ), headers };
+        return { body : stringify( body ), headers };
     }
 
-    if( !headers['content-type'] )
+    if( !headers['content-type'])
     {
         headers['content-type'] = 'application/json';
     }
 
-    return { body: JSON.stringify( body ), headers };
+    return { body : JSON.stringify( body ), headers };
 }
 
 function stringifyValue( value: unknown ): string
 {
     if( typeof value === 'number' || typeof value === 'boolean' ){ return String( value ) }
+
     if( value === null ){ return '' }
 
     return JSON.stringify( value );

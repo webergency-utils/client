@@ -26,57 +26,57 @@ export type BeforeErrorHook = ( error: HttpError ) => HttpError | void | Promise
 export type BeforeRedirectHook = ( request: Request, response: Response, url: string, options: RequestOptions ) => string | Request | void | Promise<string | Request | void>;
 
 export type ClientHooks =
-{
-    beforeRequest?   : BeforeRequestHook[]
-    afterResponse?   : AfterResponseHook[]
-    beforeRetry?     : BeforeRetryHook[]
-    beforeError?     : BeforeErrorHook[]
-    beforeRedirect?  : BeforeRedirectHook[]
-}
+    {
+        beforeRequest?  : BeforeRequestHook[]
+        afterResponse?  : AfterResponseHook[]
+        beforeRetry?    : BeforeRetryHook[]
+        beforeError?    : BeforeErrorHook[]
+        beforeRedirect? : BeforeRedirectHook[]
+    };
 
 export type FetchInit =
-{
-    cache?           : RequestCache
-    credentials?     : RequestCredentials
-    integrity?       : string
-    keepalive?       : boolean
-    mode?            : RequestMode
-    referrer?        : string
-    referrerPolicy?  : ReferrerPolicy
-    duplex?          : 'half'
-    priority?        : RequestPriority
-}
+    {
+        cache?          : RequestCache
+        credentials?    : RequestCredentials
+        integrity?      : string
+        keepalive?      : boolean
+        mode?           : RequestMode
+        referrer?       : string
+        referrerPolicy? : ReferrerPolicy
+        duplex?         : 'half'
+        priority?       : RequestPriority
+    };
 
-export type ResponseType = 'json' | 'stream'
+export type ResponseType = 'json' | 'stream';
 
 export type ClientOptions = FetchInit &
 {
-    webroot?             : string
-    baseURL?             : string
-    headers?             : HeadersInit
-    timeout?             : number
-    retry?               : number | RetryOptions
-    hooks?               : ClientHooks
-    throwHttpError?      : boolean
-    validateStatus?      : ( status: number ) => boolean
-    cookieJar?           : boolean | CookieJar
-    fetch?               : typeof fetch
-    maxRedirects?        : number
-    redirect?            : RequestRedirect
-    cancelToken?         : CancelToken
-    responseType?        : ResponseType
-    onUploadProgress?    : ProgressHandler
-    onDownloadProgress?  : ProgressHandler
-}
+    webroot?            : string
+    baseURL?            : string
+    headers?            : HeadersInit
+    timeout?            : number
+    retry?              : number | RetryOptions
+    hooks?              : ClientHooks
+    throwHttpError?     : boolean
+    validateStatus?     : ( status: number ) => boolean
+    cookieJar?          : boolean | CookieJar
+    fetch?              : typeof fetch
+    maxRedirects?       : number
+    redirect?           : RequestRedirect
+    signal?             : AbortSignal
+    cancelToken?        : CancelToken
+    responseType?       : ResponseType
+    onUploadProgress?   : ProgressHandler
+    onDownloadProgress? : ProgressHandler
+};
 
 export type RequestOptions = ClientOptions &
 {
-    query?      : unknown
-    body?       : unknown
-    form?       : Record<string, unknown>
-    multipart?  : Record<string, unknown>
-    signal?     : AbortSignal
-}
+    query?     : unknown
+    body?      : unknown
+    form?      : Record<string, unknown>
+    multipart? : Record<string, unknown>
+};
 
 export type ClientPromise = Promise<ClientResponse> &
 {
@@ -84,25 +84,37 @@ export type ClientPromise = Promise<ClientResponse> &
     text   : () => Promise<string>
     buffer : () => Promise<Uint8Array>
     stream : () => Promise<ReadableStream<Uint8Array>>
-}
+};
 
 const REDIRECT_STATUS = new Set([ 301, 302, 303, 307, 308 ]);
 const DEFAULT_MAX_REDIRECTS = 20;
+const SENSITIVE_HEADERS = [ 'authorization', 'proxy-authorization', 'cookie' ];
+const BODY_HEADERS = [ 'content-type', 'content-length', 'transfer-encoding', 'content-encoding', 'content-language', 'content-location' ];
 
 type RequestCtorInit = RequestInit &
 {
     duplex?   : 'half'
     priority? : RequestPriority
-}
+};
+
+type ComposedSignal =
+    {
+        signal?        : AbortSignal
+        timeoutSignal? : AbortSignal
+        timeoutTimer?  : ReturnType<typeof setTimeout>
+        cancelSignal?  : AbortSignal
+        userSignal?    : AbortSignal
+        request?       : Request
+    };
 
 function wrap( promise: Promise<ClientResponse> ): ClientPromise
 {
     const p = promise as ClientPromise;
 
-    p.json = <T = unknown>() => promise.then( r => r.json<T>() );
-    p.text = () => promise.then( r => r.text() );
-    p.buffer = () => promise.then( r => r.buffer() );
-    p.stream = () => promise.then( r => r.stream() );
+    p.json = <T = unknown>() => promise.then( r => r.json<T>());
+    p.text = () => promise.then( r => r.text());
+    p.buffer = () => promise.then( r => r.buffer());
+    p.stream = () => promise.then( r => r.stream());
 
     return p;
 }
@@ -120,7 +132,7 @@ function lowercaseHeaders( headers?: HeadersInit ): Record<string, string>
         return out;
     }
 
-    if( Array.isArray( headers ) )
+    if( Array.isArray( headers ))
     {
         for( const [ key, value ] of headers )
         {
@@ -130,7 +142,7 @@ function lowercaseHeaders( headers?: HeadersInit ): Record<string, string>
         return out;
     }
 
-    for( const [ key, value ] of Object.entries( headers ) )
+    for( const [ key, value ] of Object.entries( headers ))
     {
         if( value === undefined ){ continue }
 
@@ -140,6 +152,15 @@ function lowercaseHeaders( headers?: HeadersInit ): Record<string, string>
     return out;
 }
 
+const EMPTY_HOOKS: Required<ClientHooks> =
+{
+    beforeRequest  : [],
+    afterResponse  : [],
+    beforeRetry    : [],
+    beforeError    : [],
+    beforeRedirect : []
+};
+
 function mergeHeaders( base?: HeadersInit, extra?: HeadersInit ): Record<string, string>
 {
     return { ...lowercaseHeaders( base ), ...lowercaseHeaders( extra ) };
@@ -147,12 +168,14 @@ function mergeHeaders( base?: HeadersInit, extra?: HeadersInit ): Record<string,
 
 function mergeHooks( base?: ClientHooks, extra?: ClientHooks ): Required<ClientHooks>
 {
+    if( !base && !extra ){ return EMPTY_HOOKS }
+
     return {
-        beforeRequest   : [ ...( base?.beforeRequest ?? [] ), ...( extra?.beforeRequest ?? [] ) ],
-        afterResponse   : [ ...( base?.afterResponse ?? [] ), ...( extra?.afterResponse ?? [] ) ],
-        beforeRetry     : [ ...( base?.beforeRetry ?? [] ), ...( extra?.beforeRetry ?? [] ) ],
-        beforeError     : [ ...( base?.beforeError ?? [] ), ...( extra?.beforeError ?? [] ) ],
-        beforeRedirect  : [ ...( base?.beforeRedirect ?? [] ), ...( extra?.beforeRedirect ?? [] ) ]
+        beforeRequest  : [ ...( base?.beforeRequest ?? []), ...( extra?.beforeRequest ?? []) ],
+        afterResponse  : [ ...( base?.afterResponse ?? []), ...( extra?.afterResponse ?? []) ],
+        beforeRetry    : [ ...( base?.beforeRetry ?? []), ...( extra?.beforeRetry ?? []) ],
+        beforeError    : [ ...( base?.beforeError ?? []), ...( extra?.beforeError ?? []) ],
+        beforeRedirect : [ ...( base?.beforeRedirect ?? []), ...( extra?.beforeRedirect ?? []) ]
     };
 }
 
@@ -161,21 +184,46 @@ function resolveWebroot( options: ClientOptions ): string | undefined
     return options.webroot ?? options.baseURL;
 }
 
+let lastWebrootKey: string | undefined;
+let lastWebrootVal: { base : string, origin : string } | undefined;
+
+function parseWebroot( webroot: string ): { base : string, origin : string }
+{
+    if( webroot === lastWebrootKey && lastWebrootVal )
+    {
+        return lastWebrootVal;
+    }
+
+    const base = ( webroot.replace( /\?.*$/, '' ).replace( /\/+$/, '' ) + '/' );
+    lastWebrootKey = webroot;
+    lastWebrootVal = { base, origin : new URL( base ).origin };
+
+    return lastWebrootVal;
+}
+
 export function resolveUrl( webroot: string | undefined, path: string ): string
 {
-    if( /^https?:\/\//i.test( path ) ){ return path }
+    if( /^https?:\/\//i.test( path )){ return path }
 
     if( !webroot ){ return path }
 
-    const base = ( webroot.replace( /\?.*$/, '' ).replace( /\/+$/, '' ) + '/' );
+    const { base, origin } = parseWebroot( webroot );
+    const resolved = new URL( path.replace( /^[/\\]+/, '' ), base );
 
-    return new URL( path.replace( /^\//, '' ), base ).toString();
+    if( resolved.origin !== origin )
+    {
+        throw new TypeError( `Resolved URL origin mismatch: ${resolved.origin}` );
+    }
+
+    return resolved.toString();
 }
 
 function resolveJar( value: boolean | CookieJar | undefined, inherited?: CookieJar ): CookieJar | undefined
 {
     if( value instanceof CookieJar ){ return value }
+
     if( value === true ){ return inherited ?? new CookieJar() }
+
     if( value === false ){ return undefined }
 
     return inherited;
@@ -184,39 +232,79 @@ function resolveJar( value: boolean | CookieJar | undefined, inherited?: CookieJ
 function pick<T>( request: T | undefined, instance: T | undefined, fallback: T ): T
 {
     if( request !== undefined ){ return request }
+
     if( instance !== undefined ){ return instance }
 
     return fallback;
 }
 
-function composeSignal( user?: AbortSignal, timeout?: number, cancel?: AbortSignal ): { signal?: AbortSignal, timeoutSignal?: AbortSignal, cancelSignal?: AbortSignal }
+function composeSignal( user?: AbortSignal, timeout?: number, cancel?: AbortSignal ): ComposedSignal
 {
-    const timeoutSignal = timeout ? AbortSignal.timeout( timeout ) : undefined;
-    const signals = [ user, timeoutSignal, cancel ].filter( ( value ): value is AbortSignal => Boolean( value ) );
+    if( !user && !timeout && !cancel ){ return {} }
+
+    const timeoutController = timeout ? new AbortController() : undefined;
+    const timeoutSignal = timeoutController?.signal;
+    const composed: ComposedSignal = { timeoutSignal, cancelSignal : cancel, userSignal : user };
+
+    if( timeoutController )
+    {
+        composed.timeoutTimer = setTimeout(() =>
+        {
+            void composed.request;
+            timeoutController.abort( Object.assign( new Error( 'Request timed out' ), { name : 'TimeoutError' }));
+        }, timeout );
+    }
+
+    const signals = [ user, timeoutSignal, cancel ].filter(( value ): value is AbortSignal => Boolean( value ));
 
     if( signals.length > 1 && typeof AbortSignal.any === 'function' )
     {
-        return { signal: AbortSignal.any( signals ), timeoutSignal, cancelSignal: cancel };
+        composed.signal = AbortSignal.any( signals );
+
+        return composed;
     }
 
-    return { signal: signals[0], timeoutSignal, cancelSignal: cancel };
+    if( signals.length > 1 )
+    {
+        const controller = new AbortController();
+
+        for( const sig of signals )
+        {
+            if( sig.aborted )
+            {
+                controller.abort( sig.reason );
+                break;
+            }
+
+            sig.addEventListener( 'abort', () => controller.abort( sig.reason ), { once : true });
+        }
+
+        composed.signal = controller.signal;
+
+        return composed;
+    }
+
+    composed.signal = signals[0];
+
+    return composed;
 }
 
-function abortError( cause: unknown, timeoutSignal?: AbortSignal, cancelSignal?: AbortSignal ): HttpError
+function abortError( cause: unknown, timeoutSignal?: AbortSignal, cancelSignal?: AbortSignal, userSignal?: AbortSignal ): HttpError
 {
-    if( timeoutSignal?.aborted || ( cause instanceof Error && cause.name === 'TimeoutError' ) )
+    if( timeoutSignal?.aborted || ( cause instanceof Error && cause.name === 'TimeoutError' ))
     {
-        return new HttpError( 'Request timed out', { code: 'TIMEOUT', cause });
+        return new HttpError( 'Request timed out', { code : 'TIMEOUT', cause });
     }
 
-    if( cancelSignal?.aborted || ( cause instanceof Error && cause.name === 'AbortError' ) )
+    if( cancelSignal?.aborted || userSignal?.aborted || ( cause instanceof Error && cause.name === 'AbortError' ))
     {
-        const reason = typeof cancelSignal?.reason === 'string' ? cancelSignal.reason : undefined;
+        const rawReason = cancelSignal?.aborted ? cancelSignal.reason : userSignal?.reason;
+        const reason = typeof rawReason === 'string' ? rawReason : undefined;
 
-        return new HttpError( reason || 'Request canceled', { code: 'CANCELED', cause });
+        return new HttpError( reason || 'Request canceled', { code : 'CANCELED', cause });
     }
 
-    return new HttpError( 'Network request failed', { code: 'NETWORK', cause });
+    return new HttpError( 'Network request failed', { code : 'NETWORK', cause });
 }
 
 function isJsonContentType( headers: Headers ): boolean
@@ -261,43 +349,76 @@ async function readErrorBody( response: Response ): Promise<unknown>
     }
 }
 
-function sleep( ms: number ): Promise<void>
+function sleep( ms: number, userSignal?: AbortSignal, cancelSignal?: AbortSignal ): Promise<void>
 {
-    return new Promise( resolve => setTimeout( resolve, ms ) );
+    const { signal } = composeSignal( userSignal, undefined, cancelSignal );
+
+    if( signal?.aborted )
+    {
+        return Promise.reject( abortError( signal.reason, undefined, cancelSignal, userSignal ));
+    }
+
+    return new Promise(( resolve, reject ) =>
+    {
+        const onAbort = () =>
+        {
+            clearTimeout( timer );
+            reject( abortError( signal?.reason, undefined, cancelSignal, userSignal ));
+        };
+
+        const timer = setTimeout(() =>
+        {
+            signal?.removeEventListener( 'abort', onAbort );
+            resolve();
+        }, ms );
+
+        signal?.addEventListener( 'abort', onAbort, { once : true });
+    });
 }
 
 function followManually( jar: CookieJar | undefined, options: RequestOptions ): boolean
 {
     if( options.redirect === 'manual' || options.redirect === 'error' ){ return false }
+
     if( jar ){ return true }
+
     if( options.hooks?.beforeRedirect?.length ){ return true }
+
     if( options.maxRedirects !== undefined ){ return true }
 
     return false;
 }
 
-function redirectMethod( method: string, status: number ): { method: string, dropBody: boolean }
+function redirectMethod( method: string, status: number ): { method : string, dropBody : boolean }
 {
-    if( status === 303 ){ return { method: 'GET', dropBody: true } }
+    if( status === 303 ){ return { method : 'GET', dropBody : true } }
 
-    if( ( status === 301 || status === 302 ) && method !== 'GET' && method !== 'HEAD' )
+    if(( status === 301 || status === 302 ) && method !== 'GET' && method !== 'HEAD' )
     {
-        return { method: 'GET', dropBody: true };
+        return { method : 'GET', dropBody : true };
     }
 
-    return { method, dropBody: false };
+    return { method, dropBody : false };
 }
 
 function applyFetchInit( init: RequestCtorInit, options: RequestOptions ): void
 {
     if( options.cache !== undefined ){ init.cache = options.cache }
+
     if( options.credentials !== undefined ){ init.credentials = options.credentials }
+
     if( options.integrity !== undefined ){ init.integrity = options.integrity }
+
     if( options.keepalive !== undefined ){ init.keepalive = options.keepalive }
+
     if( options.mode !== undefined ){ init.mode = options.mode }
+
     if( options.referrer !== undefined ){ init.referrer = options.referrer }
+
     if( options.referrerPolicy !== undefined ){ init.referrerPolicy = options.referrerPolicy }
+
     if( options.priority !== undefined ){ init.priority = options.priority }
+
     if( options.duplex !== undefined ){ init.duplex = options.duplex }
 }
 
@@ -315,12 +436,14 @@ async function drain( response: Response ): Promise<void>
 
 export default class Client
 {
-    #options   : ClientOptions;
-    #cookieJar : CookieJar | undefined;
+    #options     : ClientOptions;
+    #baseHeaders : Record<string, string>;
+    #cookieJar   : CookieJar | undefined;
 
-    constructor( options: ClientOptions = {} )
+    constructor( options: ClientOptions = {})
     {
         this.#options = options;
+        this.#baseHeaders = lowercaseHeaders( options.headers );
         this.#cookieJar = resolveJar( options.cookieJar );
     }
 
@@ -335,9 +458,15 @@ export default class Client
             ? this.#cookieJar
             : resolveJar( options.cookieJar, options.cookieJar === true ? this.#cookieJar : undefined );
 
+        const webroot = ( options.webroot !== undefined || options.baseURL !== undefined )
+            ? resolveWebroot( options )
+            : resolveWebroot( this.#options );
+
         return new Client({
             ...this.#options,
             ...options,
+            webroot,
+            baseURL : undefined,
             headers : mergeHeaders( this.#options.headers, options.headers ),
             hooks   : mergeHooks( this.#options.hooks, options.hooks ),
             cookieJar
@@ -362,41 +491,44 @@ export default class Client
     head   ( url: string, options?: RequestOptions ){ return this.#send( 'HEAD', url, options ) }
     options( url: string, options?: RequestOptions ){ return this.#send( 'OPTIONS', url, options ) }
 
-    #send( method: string, url: string, options: RequestOptions = {} ): ClientPromise
+    #send( method: string, url: string, options: RequestOptions = {}): ClientPromise
     {
-        return wrap( this.#dispatch( method, url, options ) );
+        return wrap( this.#dispatch( method, url, options ));
     }
 
     async #dispatch( method: string, url: string, options: RequestOptions ): Promise<ClientResponse>
     {
         const hooks = mergeHooks( this.#options.hooks, options.hooks );
+        const baseHeaders = options.headers
+            ? { ...this.#baseHeaders, ...lowercaseHeaders( options.headers ) }
+            : { ...this.#baseHeaders };
         const merged: RequestOptions =
         {
             ...this.#options,
             ...options,
-            headers        : mergeHeaders( this.#options.headers, options.headers ),
+            headers            : baseHeaders,
             hooks,
-            throwHttpError : pick( options.throwHttpError, this.#options.throwHttpError, true ),
-            timeout        : pick( options.timeout, this.#options.timeout, undefined ),
-            retry          : options.retry !== undefined ? options.retry : this.#options.retry,
-            validateStatus : options.validateStatus ?? this.#options.validateStatus,
-            fetch          : options.fetch ?? this.#options.fetch,
-            webroot        : resolveWebroot( options ) ?? resolveWebroot( this.#options ),
-            maxRedirects   : options.maxRedirects ?? this.#options.maxRedirects,
-            redirect       : options.redirect ?? this.#options.redirect,
-            cache          : options.cache ?? this.#options.cache,
-            credentials    : options.credentials ?? this.#options.credentials,
-            integrity      : options.integrity ?? this.#options.integrity,
-            keepalive      : options.keepalive ?? this.#options.keepalive,
-            mode           : options.mode ?? this.#options.mode,
-            referrer       : options.referrer ?? this.#options.referrer,
-            referrerPolicy : options.referrerPolicy ?? this.#options.referrerPolicy,
-            duplex         : options.duplex ?? this.#options.duplex,
-            priority       : options.priority ?? this.#options.priority,
-            cancelToken          : options.cancelToken ?? this.#options.cancelToken,
-            responseType         : options.responseType ?? this.#options.responseType,
-            onUploadProgress     : options.onUploadProgress ?? this.#options.onUploadProgress,
-            onDownloadProgress   : options.onDownloadProgress ?? this.#options.onDownloadProgress
+            throwHttpError     : pick( options.throwHttpError, this.#options.throwHttpError, true ),
+            timeout            : pick( options.timeout, this.#options.timeout, undefined ),
+            retry              : options.retry !== undefined ? options.retry : this.#options.retry,
+            validateStatus     : options.validateStatus ?? this.#options.validateStatus,
+            fetch              : options.fetch ?? this.#options.fetch,
+            webroot            : resolveWebroot( options ) ?? resolveWebroot( this.#options ),
+            maxRedirects       : options.maxRedirects ?? this.#options.maxRedirects,
+            redirect           : options.redirect ?? this.#options.redirect,
+            cache              : options.cache ?? this.#options.cache,
+            credentials        : options.credentials ?? this.#options.credentials,
+            integrity          : options.integrity ?? this.#options.integrity,
+            keepalive          : options.keepalive ?? this.#options.keepalive,
+            mode               : options.mode ?? this.#options.mode,
+            referrer           : options.referrer ?? this.#options.referrer,
+            referrerPolicy     : options.referrerPolicy ?? this.#options.referrerPolicy,
+            duplex             : options.duplex ?? this.#options.duplex,
+            priority           : options.priority ?? this.#options.priority,
+            cancelToken        : options.cancelToken ?? this.#options.cancelToken,
+            responseType       : options.responseType ?? this.#options.responseType,
+            onUploadProgress   : options.onUploadProgress ?? this.#options.onUploadProgress,
+            onDownloadProgress : options.onDownloadProgress ?? this.#options.onDownloadProgress
         };
 
         const jar = options.cookieJar !== undefined
@@ -416,11 +548,12 @@ export default class Client
             body      : options.body,
             form      : options.form,
             multipart : options.multipart,
-            headers   : lowercaseHeaders( merged.headers )
+            headers   : baseHeaders
         });
         let redirects = 0;
         let attempt = 0;
         let pending: Request | undefined;
+        let previousUrl: string | undefined;
 
         if( options.query )
         {
@@ -436,7 +569,7 @@ export default class Client
 
         while( true )
         {
-            const headers = new Headers( mergeHeaders( merged.headers, encoded.headers ) );
+            const headers = new Headers({ ...baseHeaders, ...encoded.headers });
 
             if( encoded.body instanceof FormData )
             {
@@ -445,12 +578,18 @@ export default class Client
 
             if( jar )
             {
-                const cookie = jar.get( currentUrl, originUrl );
+                const cookie = jar.get( currentUrl, originUrl, previousUrl );
 
-                if( cookie ){ headers.set( 'cookie', cookie ) }
+                if( cookie )
+                {
+                    const existing = headers.get( 'cookie' );
+
+                    headers.set( 'cookie', existing ? `${existing}; ${cookie}` : cookie );
+                }
             }
 
-            const { signal, timeoutSignal, cancelSignal } = composeSignal( merged.signal, merged.timeout, merged.cancelToken?.signal );
+            const composed = composeSignal( merged.signal, merged.timeout, merged.cancelToken?.signal );
+            const { signal, timeoutSignal, timeoutTimer, cancelSignal, userSignal } = composed;
             let body = ( currentMethod === 'GET' || currentMethod === 'HEAD' ) ? undefined : encoded.body;
 
             if( body && merged.onUploadProgress )
@@ -459,7 +598,7 @@ export default class Client
 
                 body = tracked.body;
 
-                if( tracked.contentType && !headers.has( 'content-type' ) )
+                if( tracked.contentType && !headers.has( 'content-type' ))
                 {
                     headers.set( 'content-type', tracked.contentType );
                 }
@@ -474,14 +613,14 @@ export default class Client
 
                 if( jar )
                 {
-                    const cookie = jar.get( request.url, originUrl );
+                    const cookie = jar.get( request.url, originUrl, previousUrl );
 
                     if( cookie )
                     {
                         const cookieHeaders = new Headers( request.headers );
 
                         cookieHeaders.set( 'cookie', cookie );
-                        request = new Request( request, { headers: cookieHeaders } );
+                        request = new Request( request, { headers : cookieHeaders });
                     }
                 }
             }
@@ -498,7 +637,7 @@ export default class Client
 
                 applyFetchInit( init, merged );
 
-                if( body && ( isStreamingBody( body ) || init.duplex || merged.onUploadProgress ) )
+                if( body && ( isStreamingBody( body ) || init.duplex || merged.onUploadProgress ))
                 {
                     init.duplex = merged.duplex ?? 'half';
                 }
@@ -515,22 +654,26 @@ export default class Client
 
             let response: Response;
 
+            composed.request = request;
+
             try
             {
                 response = await doFetch( request );
             }
             catch( cause )
             {
-                const error = abortError( cause, timeoutSignal, cancelSignal );
+                if( timeoutTimer !== undefined ){ clearTimeout( timeoutTimer ) }
 
-                if( error.code !== 'CANCELED' && shouldRetry({ attempt, method: currentMethod, retry, error }) )
+                const error = abortError( cause, timeoutSignal, cancelSignal, userSignal );
+
+                if( error.code !== 'CANCELED' && !isStreamingBody( encoded.body ) && shouldRetry({ attempt, method : currentMethod, retry, error }))
                 {
                     for( const hook of hooks.beforeRetry )
                     {
                         await hook( request, error, attempt );
                     }
 
-                    await sleep( computeRetryDelay( attempt, null, retry ) );
+                    await sleep( computeRetryDelay( attempt, null, retry ), userSignal, cancelSignal );
                     attempt += 1;
 
                     continue;
@@ -539,19 +682,49 @@ export default class Client
                 throw error;
             }
 
+            if( timeoutTimer !== undefined ){ clearTimeout( timeoutTimer ) }
+
             if( jar )
             {
                 jar.storeFromResponse( request.url, response.headers );
             }
 
-            if( manual && REDIRECT_STATUS.has( response.status ) )
+            if( manual && REDIRECT_STATUS.has( response.status ))
             {
                 const location = response.headers.get( 'location' );
 
                 if( location && redirects < redirectLimit )
                 {
-                    let nextUrl = new URL( location, request.url ).toString();
+                    let parsedNext: URL;
+
+                    try
+                    {
+                        parsedNext = new URL( location, request.url );
+                    }
+                    catch( cause )
+                    {
+                        throw new HttpError( `Invalid redirect URL: ${location}`, {
+                            status : response.status,
+                            code   : 'HTTP_ERROR',
+                            response,
+                            cause
+                        });
+                    }
+
+                    if( parsedNext.protocol !== 'http:' && parsedNext.protocol !== 'https:' )
+                    {
+                        throw new HttpError( `Unsupported redirect protocol: ${parsedNext.protocol}`, {
+                            status : response.status,
+                            code   : 'HTTP_ERROR',
+                            response
+                        });
+                    }
+
+                    let nextUrl = parsedNext.toString();
                     let override: Request | undefined;
+                    const prevOrigin = new URL( request.url ).origin;
+
+                    previousUrl = request.url;
 
                     for( const hook of hooks.beforeRedirect )
                     {
@@ -584,7 +757,21 @@ export default class Client
 
                         if( redirected.dropBody )
                         {
-                            encoded = { body: undefined, headers: {} };
+                            encoded = { body : undefined, headers : {} };
+
+                            for( const key of BODY_HEADERS )
+                            {
+                                delete baseHeaders[key];
+                            }
+                        }
+                    }
+
+                    if( new URL( currentUrl ).origin !== prevOrigin )
+                    {
+                        for( const key of SENSITIVE_HEADERS )
+                        {
+                            delete baseHeaders[key];
+                            delete encoded.headers[key];
                         }
                     }
 
@@ -596,8 +783,8 @@ export default class Client
                 if( location && redirectLimit > 0 && redirects >= redirectLimit )
                 {
                     throw new HttpError( `Too many redirects (${redirectLimit})`, {
-                        status   : response.status,
-                        code     : 'HTTP_ERROR',
+                        status : response.status,
+                        code   : 'HTTP_ERROR',
                         response
                     });
                 }
@@ -610,14 +797,14 @@ export default class Client
                 if( next instanceof Response ){ response = next }
             }
 
-            if( shouldRetry({ attempt, method: currentMethod, retry, status: response.status }) )
+            if( !isStreamingBody( encoded.body ) && shouldRetry({ attempt, method : currentMethod, retry, status : response.status }))
             {
                 for( const hook of hooks.beforeRetry )
                 {
                     await hook( request, undefined, attempt );
                 }
 
-                await sleep( computeRetryDelay( attempt, response.headers.get( 'retry-after' ), retry ) );
+                await sleep( computeRetryDelay( attempt, response.headers.get( 'retry-after' ), retry ), userSignal, cancelSignal );
                 attempt += 1;
                 await drain( response );
                 continue;
@@ -628,13 +815,13 @@ export default class Client
                 response = applyDownloadProgress( response, merged.onDownloadProgress );
             }
 
-            if( !statusAllowed( response.status, merged ) )
+            if( !statusAllowed( response.status, merged ))
             {
                 const bodyData = await readErrorBody( response );
                 let error = new HttpError( `Request failed with status ${response.status}`, {
-                    status   : response.status,
-                    code     : 'HTTP_ERROR',
-                    body     : bodyData,
+                    status : response.status,
+                    code   : 'HTTP_ERROR',
+                    body   : bodyData,
                     response
                 });
 
@@ -650,7 +837,7 @@ export default class Client
 
             const res = new ClientResponse( response );
 
-            if( shouldParseJson( merged, response ) )
+            if( shouldParseJson( merged, response ))
             {
                 await res.json();
             }

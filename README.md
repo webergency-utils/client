@@ -8,7 +8,7 @@ A fetch-based HTTP client with instance defaults, nested querystrings, form enco
 [![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](https://www.npmjs.com/package/@webergency-utils/client?activeTab=dependencies)
 [![npm downloads](https://img.shields.io/npm/dm/%40webergency-utils%2Fclient)](https://www.npmjs.com/package/@webergency-utils/client)<br>
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/webergency-utils/client/badge)](https://securityscorecards.dev/viewer/?uri=github.com/webergency-utils/client)
-[![codecov](https://codecov.io/gh/webergency-utils/client/graph/badge.svg?token=)](https://codecov.io/gh/webergency-utils/client)
+[![codecov](https://codecov.io/gh/webergency-utils/client/graph/badge.svg)](https://codecov.io/gh/webergency-utils/client)
 [![CI](https://github.com/webergency-utils/client/actions/workflows/ci.yml/badge.svg)](https://github.com/webergency-utils/client/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/webergency-utils/client/actions/workflows/codeql.yml/badge.svg)](https://github.com/webergency-utils/client/actions/workflows/codeql.yml)
 
@@ -231,12 +231,12 @@ jar.get( 'https://example.com/app' ); // 'sid=abc'
 
 - **`set(url, cookieStr)`** — parse a `Set-Cookie` line in the context of `url`.
 - **`storeFromResponse(url, headers)`** — ingest `headers.getSetCookie()`.
-- **`get(url, initiator?)`** — `Cookie` header value for `url` (empty string if none). `initiator` is the first-party URL of the request chain; `Client` passes the original request URL on every redirect hop.
-- **`cookies()`** — list stored records (`name`, `value`, `domain`, `path`, `sameSite`, `httpOnly`, flags).
+- **`get(url, initiator?, previousUrl?)`** — `Cookie` header value for `url` (empty string if none). `initiator` is the first-party URL of the request chain; `previousUrl` is the immediately preceding redirect hop (used to withhold `SameSite=Strict` cookies after a cross-site redirect hop).
+- **`cookies()`** — list stored records (`name`, `value`, `domain`, `hostOnly`, `path`, `sameSite`, `httpOnly`, flags).
 
-Domain attributes that do not match the request host are ignored. `Secure` cookies are omitted on `http:`. Expired / `deleted` / empty values are dropped.
+Cookies without a `Domain` attribute are stored as host-only (`hostOnly: true`) and match only the exact origin host; cookies with a `Domain` attribute match the domain and its subdomains. `Domain` attributes that do not match the request host or target public suffixes are ignored. `Secure` cookies are omitted on `http:`. Expired / `deleted` / empty values are dropped.
 
-Unspecified `SameSite` defaults to `Lax` (Chrome). `SameSite=Lax` / `Strict` cookies are sent only when the request is same-site with both the cookie's source and the `initiator` (schemeful: `http` and `https` are different sites). `SameSite=None` requires `Secure` and is sent on cross-site hops; without `Secure` the cookie is ignored.
+Unspecified `SameSite` defaults to `Lax` (Chrome). `SameSite=Lax` / `Strict` cookies are sent only when the request is same-site with both the cookie's source and the `initiator` (schemeful: `http` and `https` are different sites); `SameSite=Strict` additionally requires `previousUrl` (when present) to be same-site. `SameSite=None` requires `Secure` and is sent on cross-site hops; without `Secure` the cookie is ignored.
 
 ### `Querystring`, `stringify`, `parse`, `parseCookies`
 
@@ -257,7 +257,7 @@ parseCookies( 'a=1; b=2' );
 
 ### `resolveUrl(webroot, path)`
 
-Joins `webroot` with a relative `path`. Absolute `http(s)` paths are returned unchanged.
+Joins `webroot` with a relative `path` (stripping leading slashes and verifying the resolved origin matches `webroot`). Absolute `http(s)` paths are returned unchanged.
 
 ### Types
 

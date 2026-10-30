@@ -3,10 +3,10 @@ import HttpError from './error';
 export type CancelExecutor = ( cancel: ( message?: string ) => void ) => void;
 
 export type CancelTokenSource =
-{
-    token  : CancelToken
-    cancel : ( message?: string ) => void
-}
+    {
+        token  : CancelToken
+        cancel : ( message?: string ) => void
+    };
 
 export default class CancelToken
 {
@@ -19,7 +19,7 @@ export default class CancelToken
         this.#controller = new AbortController();
         this.#requested = false;
 
-        executor( ( message ) => this.#cancel( message ) );
+        executor(( message ) => this.#cancel( message ));
     }
 
     get signal(): AbortSignal
@@ -41,13 +41,13 @@ export default class CancelToken
     {
         if( !this.#requested ){ return }
 
-        throw new HttpError( this.#reason ?? 'Request canceled', { code: 'CANCELED' });
+        throw new HttpError( this.#reason || 'Request canceled', { code : 'CANCELED' });
     }
 
     static source(): CancelTokenSource
     {
         let cancel!: ( message?: string ) => void;
-        const token = new CancelToken( ( next ) => { cancel = next });
+        const token = new CancelToken(( next ) => { cancel = next });
 
         return { token, cancel };
     }

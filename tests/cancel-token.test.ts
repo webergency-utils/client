@@ -4,7 +4,7 @@ import HttpError from '../src/error';
 
 describe( 'CancelToken', () =>
 {
-    beforeEach( () =>
+    beforeEach(() =>
     {
         /* isolation */
     });
@@ -51,18 +51,23 @@ describe( 'CancelToken', () =>
         expect( token.reason ).toBe( 'first' );
     });
 
-    it( 'should throw a default message when cancel() had no reason', () =>
+    it( 'should throw a default message when cancel() had no reason or an empty reason', () =>
     {
         const { token, cancel } = CancelToken.source();
 
         cancel();
-        expect( () => token.throwIfRequested() ).toThrow( 'Request canceled' );
+        expect(() => token.throwIfRequested()).toThrow( 'Request canceled' );
+
+        const { token: emptyToken, cancel: cancelEmpty } = CancelToken.source();
+
+        cancelEmpty( '' );
+        expect(() => emptyToken.throwIfRequested()).toThrow( 'Request canceled' );
     });
 
     it( 'should no-op throwIfRequested before cancel', () =>
     {
         const { token } = CancelToken.source();
 
-        expect( () => token.throwIfRequested() ).not.toThrow();
+        expect(() => token.throwIfRequested()).not.toThrow();
     });
 });

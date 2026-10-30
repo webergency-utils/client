@@ -16,7 +16,7 @@ export default class HttpError extends Error
         cause?    : unknown
     })
     {
-        super( message, options.cause !== undefined ? { cause: options.cause } : undefined );
+        super( message, options.cause !== undefined ? { cause : options.cause } : undefined );
 
         this.name = 'HttpError';
         this.status = options.status;

@@ -2,15 +2,69 @@ const SEP = '&';
 const EQ = '=';
 const DEL = ';';
 const INT_RE = /^[0-9]+$/;
+const SIGNED_INT_RE = /^[+-]?[0-9]+$/;
+const SIGNED_FLOAT_RE = /^[+-]?([0-9]*\.[0-9]+)$/;
+const MAX_ARRAY_INDEX = 1000;
 
 export type QueryType = 'null' | 'undefined' | 'boolean' | 'number';
 
 export type QueryParseOptions =
+    {
+        types? : QueryType[]
+    };
+
+type QueryRecord = Record<string | number, unknown>;
+
+function hasOwn( obj: unknown, key: PropertyKey ): boolean
 {
-    types? : QueryType[]
+    return typeof obj === 'object' && obj !== null && Object.prototype.hasOwnProperty.call( obj, key );
 }
 
-type QueryRecord = Record<string | number, unknown>
+function isBlockedKey( key: string | number ): boolean
+{
+    return key === '__proto__' || key === 'constructor' || key === 'prototype';
+}
+
+function isArrayIndex( key: string ): boolean
+{
+    return INT_RE.test( key ) && parseInt( key, 10 ) <= MAX_ARRAY_INDEX;
+}
+
+function maxNumericKey( obj: Record<string, unknown> ): number
+{
+    let max = -1;
+
+    for( const key of Object.keys( obj ))
+    {
+        if( isArrayIndex( key ))
+        {
+            max = parseInt( key, 10 );
+        }
+    }
+
+    return max;
+}
+
+function safeDecode( value: string ): string
+{
+    if( !value.includes( '%' )){ return value }
+
+    try
+    {
+        return decodeURIComponent( value );
+    }
+    catch
+    {
+        return value;
+    }
+}
+
+function decodeQueryPart( value: string ): string
+{
+    const normalized = value.includes( '+' ) ? value.replace( /\+/g, ' ' ) : value;
+
+    return safeDecode( normalized );
+}
 
 function expand( data: unknown, pairs: string[] = [], prefix = '' ): string[]
 {
@@ -21,15 +75,19 @@ function expand( data: unknown, pairs: string[] = [], prefix = '' ): string[]
 
     if( data === null )
     {
-        pairs.push( prefix );
+        if( prefix ){ pairs.push( prefix ) }
     }
     else if( typeof data === 'boolean' )
     {
-        pairs.push( prefix + '=' + ( data ? '1' : '0' ));
+        if( prefix ){ pairs.push( prefix + '=' + ( data ? '1' : '0' )) }
     }
-    else if( typeof data === 'number' || typeof data === 'string' )
+    else if( typeof data === 'number' )
     {
-        pairs.push( prefix + '=' + encodeURIComponent( data.toString() ));
+        if( prefix ){ pairs.push( prefix + '=' + data ) }
+    }
+    else if( typeof data === 'string' )
+    {
+        if( prefix ){ pairs.push( prefix + '=' + encodeURIComponent( data )) }
     }
     else if( Array.isArray( data ))
     {
@@ -42,12 +100,14 @@ function expand( data: unknown, pairs: string[] = [], prefix = '' ): string[]
     {
         for( const key in data as Record<string, unknown> )
         {
-            if( !Object.prototype.hasOwnProperty.call( data, key ) ){ continue }
+            if( !hasOwn( data, key )){ continue }
+
+            const encodedKey = encodeURIComponent( key );
 
             expand(
                 ( data as Record<string, unknown> )[key],
                 pairs,
-                prefix ? prefix + '[' + key + ']' : key
+                prefix ? prefix + '[' + encodedKey + ']' : encodedKey
             );
         }
     }
@@ -55,101 +115,101 @@ function expand( data: unknown, pairs: string[] = [], prefix = '' ): string[]
     return pairs;
 }
 
-function typedValue( value: string, types: QueryType[] = [] ): unknown
+function typedValue( value: string, types: QueryType[] = []): unknown
 {
-    if( value === 'null' && types.includes( 'null' ) ){ return null }
-    if( value === 'undefined' && types.includes( 'undefined' ) ){ return undefined }
-    if( [ 'true', 'false' ].includes( value ) && types.includes( 'boolean' ) ){ return value === 'true' }
-    if( /^[+-]?[0-9]+$/.test( value ) && types.includes( 'number' ) ){ return parseInt( value, 10 ) }
-    if( /^[+-]?([0-9]*\.[0-9]+)$/.test( value ) && types.includes( 'number' ) ){ return parseFloat( value ) }
+    if( value === 'null' && types.includes( 'null' )){ return null }
+
+    if( value === 'undefined' && types.includes( 'undefined' )){ return undefined }
+
+    if(( value === 'true' || value === 'false' ) && types.includes( 'boolean' )){ return value === 'true' }
+
+    if( SIGNED_INT_RE.test( value ) && types.includes( 'number' )){ return parseInt( value, 10 ) }
+
+    if( SIGNED_FLOAT_RE.test( value ) && types.includes( 'number' )){ return parseFloat( value ) }
 
     return value;
 }
 
-function createQuery(): QueryRecord
+function assignQuery( query: QueryRecord, key: string, value: unknown, types?: QueryType[]): void
 {
-    const query: QueryRecord = {};
+    const keys = key.includes( '[' )
+        ? key.replace( /\]\[/g, '[' ).replace( /]$/, '' ).split( '[' )
+        : [ key ];
 
-    Object.defineProperty( query, 'assign',
+    for( const segment of keys )
     {
-        enumerable   : false,
-        configurable : false,
-        value        : ( key: string, value: unknown, types?: QueryType[] ) =>
+        if( isBlockedKey( segment )){ return }
+    }
+
+    let obj: any = query;
+    let parent: any;
+    let parentKey: string | number | undefined;
+    const parsed = types ? typedValue( value as string, types ) : value;
+
+    for( let i = 0; i < keys.length; ++i )
+    {
+        let k: string | number = keys[i];
+
+        if( k && isArrayIndex( k ))
         {
-            const keys = key.replace( /\]\[/g, '[' ).replace( /]$/, '' ).split( '[' );
-            let obj: any = query;
-            let parent: any;
-            let parentKey: string | number | undefined;
-            let parsed = types ? typedValue( value as string, types ) : value;
+            k = parseInt( keys[i], 10 );
+        }
+        else if( k === '' )
+        {
+            k = Array.isArray( obj )
+                ? obj.length - 1
+                : maxNumericKey( obj );
 
-            for( let i = 0; i < keys.length; ++i )
+            if( k === -1 || i === keys.length - 1 || hasOwn( obj[k], keys[i + 1]))
             {
-                let k: string | number = keys[i];
+                k += 1;
+            }
+        }
 
-                if( k && INT_RE.test( k ) )
+        if( typeof k === 'string' && Array.isArray( obj ))
+        {
+            parent[parentKey!] = obj = obj.reduce(( o: Record<string, unknown>, v: unknown, idx: number ) =>
+            {
+                o[idx] = v;
+
+                return o;
+            }, {});
+        }
+
+        if( i < keys.length - 1 )
+        {
+            if( !hasOwn( obj, k ) || typeof obj[k] !== 'object' || obj[k] === null )
+            {
+                obj[k] = ( keys[i + 1] === '' || isArrayIndex( keys[i + 1])) ? [] : {};
+            }
+
+            parent = obj;
+            parentKey = k;
+            obj = obj[k];
+        }
+        else
+        {
+            if( hasOwn( obj, k ) && obj[k] !== undefined )
+            {
+                if( Array.isArray( obj[k]))
                 {
-                    k = parseInt( keys[i], 10 );
+                    obj[k].push( parsed );
                 }
-                else if( k === '' )
+                else if( typeof obj[k] === 'object' && obj[k] !== null )
                 {
-                    k = Array.isArray( obj )
-                        ? obj.length - 1
-                        : Math.max( -1, ...Object.keys( obj ).map( x => INT_RE.test( x ) ? parseInt( x, 10 ) : -1 ));
-
-                    if( k === -1 || i === keys.length - 1 || obj[k]?.hasOwnProperty?.( keys[i + 1] ) )
-                    {
-                        k += 1;
-                    }
-                }
-
-                if( typeof k === 'string' && Array.isArray( obj ) )
-                {
-                    parent[parentKey!] = obj = obj.reduce(( o: Record<string, unknown>, v: unknown, idx: number ) =>
-                    {
-                        o[idx] = v;
-
-                        return o;
-                    }, {});
-                }
-
-                if( i < keys.length - 1 )
-                {
-                    if( !obj[k] )
-                    {
-                        obj[k] = ( keys[i + 1] === '' || INT_RE.test( keys[i + 1] )) ? [] : {};
-                    }
-
-                    parent = obj;
-                    parentKey = k;
-                    obj = obj[k];
+                    obj[k][ maxNumericKey( obj[k]) + 1 ] = parsed;
                 }
                 else
                 {
-                    if( obj[k] !== undefined )
-                    {
-                        if( Array.isArray( obj[k] ) )
-                        {
-                            obj[k].push( parsed );
-                        }
-                        else if( typeof obj[k] === 'object' && obj[k] !== null )
-                        {
-                            obj[k][ Math.max( -1, ...Object.keys( obj ).map( x => INT_RE.test( x ) ? parseInt( x, 10 ) : -1 )) + 1 ] = parsed;
-                        }
-                        else
-                        {
-                            ( obj[k] = [ obj[k] ] ).push( parsed );
-                        }
-                    }
-                    else
-                    {
-                        obj[k] = parsed;
-                    }
+                    ( obj[k] = [ obj[k] ]).push( parsed );
                 }
             }
+            else
+            {
+                obj[k] = parsed;
+            }
         }
-    });
-
-    return query;
+    }
 }
 
 export function stringify( data: unknown ): string
@@ -157,9 +217,9 @@ export function stringify( data: unknown ): string
     return expand( data ).join( '&' );
 }
 
-export function parse( queryString: string, options: QueryParseOptions = {} ): Record<string, unknown>
+export function parse( queryString: string, options: QueryParseOptions = {}): Record<string, unknown>
 {
-    const data = createQuery() as any;
+    const data: Record<string, unknown> = {};
     let lastPair = 0;
 
     do
@@ -168,21 +228,25 @@ export function parse( queryString: string, options: QueryParseOptions = {} ): R
 
         if( pair === -1 ){ pair = queryString.length }
 
-        if( pair - lastPair > 1 )
+        if( pair > lastPair )
         {
             const value = queryString.indexOf( EQ, lastPair );
 
             if( value !== -1 && value < pair )
             {
-                data.assign(
-                    decodeURIComponent( queryString.substring( lastPair, value ).replace( /\+/g, ' ' )),
-                    decodeURIComponent( queryString.substring( value + 1, pair ).replace( /\+/g, ' ' )),
-                    options.types
-                );
+                if( value > lastPair )
+                {
+                    assignQuery(
+                        data,
+                        decodeQueryPart( queryString.substring( lastPair, value )),
+                        decodeQueryPart( queryString.substring( value + 1, pair )),
+                        options.types
+                    );
+                }
             }
             else
             {
-                data.assign( decodeURIComponent( queryString.substring( lastPair, pair ).replace( /\+/g, ' ' )), null );
+                assignQuery( data, decodeQueryPart( queryString.substring( lastPair, pair )), null );
             }
         }
 
@@ -206,16 +270,19 @@ export function parseCookies( cookieString?: string | null ): Record<string, str
 
         if( pair === -1 ){ pair = cookieString.length }
 
-        if( pair - lastPair > 1 )
+        if( pair > lastPair )
         {
             const value = cookieString.indexOf( EQ, lastPair );
 
             if( value !== -1 && value < pair )
             {
-                const key = decodeURIComponent( cookieString.substring( lastPair, value ).trim() );
-                const val = decodeURIComponent( cookieString.substring( value + 1, pair ).trim() );
+                const key = safeDecode( cookieString.substring( lastPair, value ).trim());
+                const val = safeDecode( cookieString.substring( value + 1, pair ).trim());
 
-                cookies[key] = val;
+                if( key && !isBlockedKey( key ))
+                {
+                    cookies[key] = val;
+                }
             }
         }
 

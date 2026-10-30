@@ -5,7 +5,7 @@ import Client from '../src/client';
 
 describe( 'Client in a browser-like environment', () =>
 {
-    beforeEach( () =>
+    beforeEach(() =>
     {
         vi.clearAllMocks();
     });
@@ -14,21 +14,21 @@ describe( 'Client in a browser-like environment', () =>
     {
         const fetchMock = vi.fn( async ( input: Request ) =>
         {
-            if( input.url.endsWith( '/login' ) )
+            if( input.url.endsWith( '/login' ))
             {
                 expect( input.method ).toBe( 'POST' );
-                expect( input.headers.get( 'content-type' ) ).toBe( 'application/x-www-form-urlencoded' );
-                expect( await input.text() ).toBe( 'user=ada' );
+                expect( input.headers.get( 'content-type' )).toBe( 'application/x-www-form-urlencoded' );
+                expect( await input.text()).toBe( 'user=ada' );
 
-                return new Response( JSON.stringify({ ok: true }), {
+                return new Response( JSON.stringify({ ok : true }), {
                     status  : 200,
-                    headers : { 'content-type': 'application/json' }
+                    headers : { 'content-type' : 'application/json' }
                 });
             }
 
-            return new Response( JSON.stringify({ user: 'ada' }), {
+            return new Response( JSON.stringify({ user : 'ada' }), {
                 status  : 200,
-                headers : { 'content-type': 'application/json' }
+                headers : { 'content-type' : 'application/json' }
             });
         });
         const client = new Client({
@@ -36,14 +36,14 @@ describe( 'Client in a browser-like environment', () =>
             fetch   : fetchMock as typeof fetch
         });
 
-        expect(( await client.get( '/session' ) ).data ).toEqual({ user: 'ada' });
+        expect(( await client.get( '/session' )).data ).toEqual({ user : 'ada' });
 
-        await client.post( '/login', { form: { user: 'ada' } });
+        await client.post( '/login', { form : { user : 'ada' } });
 
         const blob = new Blob([ 'hi' ]);
 
         await client.post( '/upload', {
-            multipart        : { file: blob, name: 'a' },
+            multipart        : { file : blob, name : 'a' },
             onUploadProgress : () => {}
         });
 

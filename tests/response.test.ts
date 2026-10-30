@@ -3,7 +3,7 @@ import ClientResponse from '../src/response';
 
 describe( 'ClientResponse', () =>
 {
-    beforeEach( () =>
+    beforeEach(() =>
     {
         /* isolation */
     });
@@ -12,18 +12,32 @@ describe( 'ClientResponse', () =>
     {
         const res = new ClientResponse( new Response( '{"a":1}', {
             status  : 200,
-            headers : { 'content-type': 'application/json' }
+            headers : { 'content-type' : 'application/json' }
         }));
 
-        expect( await res.json() ).toEqual({ a: 1 });
-        expect( await res.text() ).toBe( '{"a":1}' );
+        expect( await res.json()).toEqual({ a : 1 });
+        expect( await res.text()).toBe( '{"a":1}' );
+    });
+
+    it( 'should share the in-flight arrayBuffer read across concurrent body calls', async () =>
+    {
+        const res = new ClientResponse( new Response( '{"a":1}', {
+            status  : 200,
+            headers : { 'content-type' : 'application/json' }
+        }));
+
+        const [ json, text, buf ] = await Promise.all([ res.json(), res.text(), res.buffer() ]);
+
+        expect( json ).toEqual({ a : 1 });
+        expect( text ).toBe( '{"a":1}' );
+        expect( new TextDecoder().decode( buf )).toBe( '{"a":1}' );
     });
 
     it( 'should return undefined for empty JSON bodies', async () =>
     {
-        const res = new ClientResponse( new Response( '', { status: 200 }));
+        const res = new ClientResponse( new Response( '', { status : 200 }));
 
-        expect( await res.json() ).toBeUndefined();
+        expect( await res.json()).toBeUndefined();
     });
 
     it( 'should return a Uint8Array from buffer()', async () =>
@@ -32,7 +46,7 @@ describe( 'ClientResponse', () =>
         const bytes = await res.buffer();
 
         expect( bytes ).toBeInstanceOf( Uint8Array );
-        expect( new TextDecoder().decode( bytes ) ).toBe( 'hi' );
+        expect( new TextDecoder().decode( bytes )).toBe( 'hi' );
     });
 
     it( 'should expose a web ReadableStream from stream()', async () =>
@@ -53,7 +67,7 @@ describe( 'ClientResponse', () =>
 
         await res.text();
 
-        const text = await new Response( res.stream() ).text();
+        const text = await new Response( res.stream()).text();
 
         expect( text ).toBe( 'cached' );
     });
@@ -62,28 +76,30 @@ describe( 'ClientResponse', () =>
     {
         const res = new ClientResponse( new Response( '{"a":1}', {
             status  : 200,
-            headers : { 'content-type': 'application/json' }
+            headers : { 'content-type' : 'application/json' }
         }));
 
         expect( res.data ).toBeUndefined();
-        expect( await res.json() ).toEqual({ a: 1 });
-        expect( res.data ).toEqual({ a: 1 });
-        expect( await res.json() ).toBe( res.data );
+        expect( await res.json()).toEqual({ a : 1 });
+        expect( res.data ).toEqual({ a : 1 });
+        expect( await res.json()).toBe( res.data );
     });
 
     it( 'should leave data undefined for an empty JSON body after json()', async () =>
     {
-        const res = new ClientResponse( new Response( '', { status: 200 }));
+        const res = new ClientResponse( new Response( '', { status : 200 }));
 
-        expect( await res.json() ).toBeUndefined();
+        expect( await res.json()).toBeUndefined();
         expect( res.data ).toBeUndefined();
     });
 
-    it( 'should return an empty stream when the Response has no body', () =>
+    it( 'should return a closed empty stream when the Response has no body', async () =>
     {
         const res = new ClientResponse( new Response( null ));
+        const stream = res.stream();
 
-        expect( res.stream() ).toBeInstanceOf( ReadableStream );
+        expect( stream ).toBeInstanceOf( ReadableStream );
+        expect( await new Response( stream ).text()).toBe( '' );
     });
 
     it( 'should expose the raw Response', () =>

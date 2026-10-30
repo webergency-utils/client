@@ -1,5 +1,5 @@
-const { FuzzedDataProvider } = require('@jazzer.js/core');
-const client = require('./dist/client.cjs');
+const { FuzzedDataProvider } = require( '@jazzer.js/core' );
+const client = require( './dist/client.cjs' );
 
 function createFuzzedInput( provider, depth = 0, maxDepth = 3 )
 {
@@ -52,13 +52,13 @@ function createFuzzedInput( provider, depth = 0, maxDepth = 3 )
 
 function swallow( promise )
 {
-    promise.then( ( res ) =>
+    promise.then(( res ) =>
     {
-        res.json().catch( () => {} );
-        res.text().catch( () => {} );
-        res.buffer().catch( () => {} );
+        res.json().catch(() => {});
+        res.text().catch(() => {});
+        res.buffer().catch(() => {});
         res.stream();
-    }).catch( () => {} );
+    }).catch(() => {});
 }
 
 module.exports.fuzz = function( data )
@@ -68,9 +68,11 @@ module.exports.fuzz = function( data )
         const provider = new FuzzedDataProvider( data );
         const input = createFuzzedInput( provider );
         const qs = client.stringify( input );
+        const rawQs = provider.consumeString( 40 );
 
         client.parse( qs );
-        client.parse( provider.consumeString( 40 ), { types: [ 'number', 'boolean', 'null' ] });
+        client.stringify( client.parse( rawQs ) );
+        client.parse( rawQs, { types: [ 'number', 'boolean', 'null' ] });
         client.parseCookies( provider.consumeString( 40 ) );
         client.Querystring.stringify( input );
         client.Querystring.parse( qs );
@@ -83,7 +85,7 @@ module.exports.fuzz = function( data )
         jar.set( 'https://example.com/app', 'sid=' + provider.consumeString( 8 ) + '; Path=/' );
         jar.set( 'https://example.com/', provider.consumeString( 40 ) );
         jar.storeFromResponse( 'https://example.com/', new Headers({ 'set-cookie': 'a=' + provider.consumeString( 6 ) }));
-        jar.get( 'https://example.com/app' );
+        jar.get( 'https://example.com/app', 'https://example.com/', provider.consumeString( 16 ) );
         jar.cookies();
 
         new client.HttpError( provider.consumeString( 16 ), {
@@ -97,9 +99,9 @@ module.exports.fuzz = function( data )
             headers : { 'content-type': 'application/json' }
         }));
 
-        wrapped.json().catch( () => {} );
-        wrapped.text().catch( () => {} );
-        wrapped.buffer().catch( () => {} );
+        wrapped.json().catch(() => {});
+        wrapped.text().catch(() => {});
+        wrapped.buffer().catch(() => {});
         wrapped.stream();
         void wrapped.ok;
         void wrapped.status;
@@ -145,18 +147,18 @@ module.exports.fuzz = function( data )
         const query = ( typeof input === 'object' && input !== null ) ? input : { q: input };
         const path = '/' + provider.consumeString( 8 );
 
-        swallow( http.get( path, { query, fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.post( path, { body: input, fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.put( path, { form: { a: provider.consumeString( 8 ) }, fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.patch( path, { fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.delete( path, { fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.head( path, { fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.options( path, { fetch: fakeFetch, retry: 0 } ) );
-        swallow( http.request( 'PATCH', path, { fetch: fakeFetch, retry: 0 } ) );
-        swallow( Client.get( 'https://example.com/', { fetch: fakeFetch, retry: 0 } ) );
-        swallow( Client.post( 'https://example.com/', { body: { n: 1 }, fetch: fakeFetch, retry: 0 } ) );
-        swallow( Client.options( 'https://example.com/', { fetch: fakeFetch, retry: 0 } ) );
-        swallow( Client.request( 'HEAD', 'https://example.com/', { fetch: fakeFetch, retry: 0 } ) );
+        swallow( http.get( path, { query, fetch: fakeFetch, retry: 0 }) );
+        swallow( http.post( path, { body: input, fetch: fakeFetch, retry: 0 }) );
+        swallow( http.put( path, { form: { a: provider.consumeString( 8 ) }, fetch: fakeFetch, retry: 0 }) );
+        swallow( http.patch( path, { fetch: fakeFetch, retry: 0 }) );
+        swallow( http.delete( path, { fetch: fakeFetch, retry: 0 }) );
+        swallow( http.head( path, { fetch: fakeFetch, retry: 0 }) );
+        swallow( http.options( path, { fetch: fakeFetch, retry: 0 }) );
+        swallow( http.request( 'PATCH', path, { fetch: fakeFetch, retry: 0 }) );
+        swallow( Client.get( 'https://example.com/', { fetch: fakeFetch, retry: 0 }) );
+        swallow( Client.post( 'https://example.com/', { body: { n: 1 }, fetch: fakeFetch, retry: 0 }) );
+        swallow( Client.options( 'https://example.com/', { fetch: fakeFetch, retry: 0 }) );
+        swallow( Client.request( 'HEAD', 'https://example.com/', { fetch: fakeFetch, retry: 0 }) );
     }
     catch( e )
     {

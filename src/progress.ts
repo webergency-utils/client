@@ -1,16 +1,17 @@
 import { isBuffer } from './runtime';
 
 export type ProgressEvent =
-{
-    loaded           : number
-    total            : number | undefined
-    lengthComputable : boolean
-    percent          : number | undefined
-}
+    {
+        loaded           : number
+        total            : number | undefined
+        lengthComputable : boolean
+        percent          : number | undefined
+    };
 
 export type ProgressHandler = ( event: ProgressEvent ) => void;
 
 const CHUNK = 64 * 1024;
+const TEXT_ENCODER = new TextEncoder();
 
 function mediaType( type: string ): string | undefined
 {
@@ -27,9 +28,14 @@ export function progressEvent( loaded: number, total?: number ): ProgressEvent
     };
 }
 
-function toUint8Array( value: ArrayBuffer | Uint8Array | Buffer ): Uint8Array
+function toUint8Array( value: ArrayBuffer | ArrayBufferView | Uint8Array | Buffer ): Uint8Array
 {
     if( value instanceof Uint8Array ){ return value }
+
+    if( ArrayBuffer.isView( value ))
+    {
+        return new Uint8Array( value.buffer, value.byteOffset, value.byteLength );
+    }
 
     return new Uint8Array( value );
 }
@@ -41,13 +47,12 @@ function streamFromBytes( bytes: Uint8Array, onProgress: ProgressHandler ): Read
     return new ReadableStream({
         start()
         {
-            onProgress( progressEvent( 0, bytes.byteLength ) );
+            onProgress( progressEvent( 0, bytes.byteLength ));
         },
         pull( controller )
         {
             if( offset >= bytes.byteLength )
             {
-                onProgress( progressEvent( bytes.byteLength, bytes.byteLength ) );
                 controller.close();
 
                 return;
@@ -55,9 +60,9 @@ function streamFromBytes( bytes: Uint8Array, onProgress: ProgressHandler ): Read
 
             const end = Math.min( offset + CHUNK, bytes.byteLength );
 
-            controller.enqueue( bytes.subarray( offset, end ) );
+            controller.enqueue( bytes.subarray( offset, end ));
             offset = end;
-            onProgress( progressEvent( offset, bytes.byteLength ) );
+            onProgress( progressEvent( offset, bytes.byteLength ));
         }
     });
 }
@@ -67,7 +72,7 @@ function tapWebStream( stream: ReadableStream<Uint8Array>, onProgress: ProgressH
     let loaded = 0;
     const reader = stream.getReader();
 
-    onProgress( progressEvent( 0, total ) );
+    onProgress( progressEvent( 0, total ));
 
     return new ReadableStream({
         async pull( controller )
@@ -76,14 +81,18 @@ function tapWebStream( stream: ReadableStream<Uint8Array>, onProgress: ProgressH
 
             if( done )
             {
-                onProgress( progressEvent( loaded, total ?? loaded ) );
+                if( total === undefined )
+                {
+                    onProgress( progressEvent( loaded, loaded ));
+                }
+
                 controller.close();
 
                 return;
             }
 
             loaded += value.byteLength;
-            onProgress( progressEvent( loaded, total ) );
+            onProgress( progressEvent( loaded, total ));
             controller.enqueue( value );
         },
         cancel( reason )
@@ -98,7 +107,7 @@ async function tapAsyncIterable( iterable: AsyncIterable<unknown>, onProgress: P
     const iterator = iterable[Symbol.asyncIterator]();
     let loaded = 0;
 
-    onProgress( progressEvent( 0 ) );
+    onProgress( progressEvent( 0 ));
 
     return new ReadableStream({
         async pull( controller )
@@ -107,62 +116,69 @@ async function tapAsyncIterable( iterable: AsyncIterable<unknown>, onProgress: P
 
             if( done )
             {
-                onProgress( progressEvent( loaded, loaded ) );
+                onProgress( progressEvent( loaded, loaded ));
                 controller.close();
 
                 return;
             }
 
-            const chunk = typeof value === 'string' ? new TextEncoder().encode( value ) : toUint8Array( value as ArrayBuffer | Uint8Array );
+            const chunk = typeof value === 'string' ? TEXT_ENCODER.encode( value ) : toUint8Array( value as ArrayBuffer | ArrayBufferView );
             loaded += chunk.byteLength;
-            onProgress( progressEvent( loaded ) );
+            onProgress( progressEvent( loaded ));
             controller.enqueue( chunk );
+        },
+        async cancel( reason )
+        {
+            if( typeof iterator.return === 'function' )
+            {
+                await iterator.return( reason );
+            }
         }
     });
 }
 
-export async function applyUploadProgress( body: BodyInit, onProgress: ProgressHandler ): Promise<{ body: BodyInit, contentType?: string }>
+export async function applyUploadProgress( body: BodyInit, onProgress: ProgressHandler ): Promise<{ body : BodyInit, contentType? : string }>
 {
     if( typeof body === 'string' )
     {
-        return { body: streamFromBytes( new TextEncoder().encode( body ), onProgress ) };
+        return { body : streamFromBytes( TEXT_ENCODER.encode( body ), onProgress ) };
     }
 
-    if( isBuffer( body ) )
+    if( isBuffer( body ))
     {
-        return { body: streamFromBytes( body, onProgress ) };
+        return { body : streamFromBytes( body, onProgress ) };
     }
 
     if( body instanceof Uint8Array )
     {
-        return { body: streamFromBytes( body, onProgress ) };
+        return { body : streamFromBytes( body, onProgress ) };
     }
 
     if( body instanceof ArrayBuffer )
     {
-        return { body: streamFromBytes( new Uint8Array( body ), onProgress ) };
+        return { body : streamFromBytes( new Uint8Array( body ), onProgress ) };
     }
 
     if( typeof Blob !== 'undefined' && body instanceof Blob )
     {
-        return { body: streamFromBytes( new Uint8Array( await body.arrayBuffer() ), onProgress ), contentType: mediaType( body.type ) };
+        return { body : streamFromBytes( new Uint8Array( await body.arrayBuffer()), onProgress ), contentType : mediaType( body.type ) };
     }
 
     if( typeof FormData !== 'undefined' && body instanceof FormData )
     {
         const blob = await new Response( body ).blob();
 
-        return { body: streamFromBytes( new Uint8Array( await blob.arrayBuffer() ), onProgress ), contentType: mediaType( blob.type ) };
+        return { body : streamFromBytes( new Uint8Array( await blob.arrayBuffer()), onProgress ), contentType : mediaType( blob.type ) };
     }
 
     if( typeof ReadableStream !== 'undefined' && body instanceof ReadableStream )
     {
-        return { body: tapWebStream( body as ReadableStream<Uint8Array>, onProgress ) };
+        return { body : tapWebStream( body as ReadableStream<Uint8Array>, onProgress ) };
     }
 
-    if( body && typeof ( body as unknown as { [Symbol.asyncIterator]?: unknown } )[Symbol.asyncIterator] === 'function' )
+    if( body && typeof ( body as unknown as { [Symbol.asyncIterator]? : unknown })[Symbol.asyncIterator] === 'function' )
     {
-        return { body: await tapAsyncIterable( body as unknown as AsyncIterable<unknown>, onProgress ) };
+        return { body : await tapAsyncIterable( body as unknown as AsyncIterable<unknown>, onProgress ) };
     }
 
     return { body };
@@ -174,7 +190,7 @@ export function applyDownloadProgress( response: Response, onProgress: ProgressH
 
     if( !body )
     {
-        onProgress( progressEvent( 0, 0 ) );
+        onProgress( progressEvent( 0, 0 ));
 
         return response;
     }

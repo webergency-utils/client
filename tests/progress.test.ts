@@ -3,7 +3,7 @@ import { applyDownloadProgress, applyUploadProgress, progressEvent } from '../sr
 
 describe( 'progress', () =>
 {
-    beforeEach( () =>
+    beforeEach(() =>
     {
         /* isolation */
     });
@@ -15,46 +15,46 @@ describe( 'progress', () =>
         expect( progressEvent( 5 ).lengthComputable ).toBe( false );
     });
 
-    it( 'should track upload progress for strings, buffers, and typed arrays', async () =>
+    it( 'should track upload progress for strings, buffers, and typed arrays without duplicate completion events', async () =>
     {
         const seen: number[] = [];
-        const onProgress = ( event: { loaded: number } ) => { seen.push( event.loaded ) };
+        const onProgress = ( event: { loaded : number }) => { seen.push( event.loaded ) };
 
         const stringed = await applyUploadProgress( 'hello', onProgress );
 
         await new Response( stringed.body ).arrayBuffer();
-        expect( seen.at( -1 ) ).toBe( 5 );
+        expect( seen ).toEqual([ 0, 5 ]);
 
         seen.length = 0;
         const buffered = await applyUploadProgress( Buffer.from( 'ab' ), onProgress );
 
         await new Response( buffered.body ).arrayBuffer();
-        expect( seen.at( -1 ) ).toBe( 2 );
+        expect( seen ).toEqual([ 0, 2 ]);
 
         seen.length = 0;
         const bytes = await applyUploadProgress( new Uint8Array([ 1, 2, 3 ]), onProgress );
 
         await new Response( bytes.body ).arrayBuffer();
-        expect( seen.at( -1 ) ).toBe( 3 );
+        expect( seen ).toEqual([ 0, 3 ]);
 
         seen.length = 0;
         const ab = await applyUploadProgress( new Uint8Array([ 9 ]).buffer, onProgress );
 
         await new Response( ab.body ).arrayBuffer();
-        expect( seen.at( -1 ) ).toBe( 1 );
+        expect( seen ).toEqual([ 0, 1 ]);
     });
 
     it( 'should track upload progress for Blob and FormData and keep content-type', async () =>
     {
         const blobEvents: number[] = [];
-        const blob = new Blob([ 'xyz' ], { type: 'text/plain' });
+        const blob = new Blob([ 'xyz' ], { type : 'text/plain' });
         const blobbed = await applyUploadProgress( blob, ( event ) => { blobEvents.push( event.loaded ) });
 
         await new Response( blobbed.body ).arrayBuffer();
-        expect( blobbed.contentType?.startsWith( 'text/plain' ) ).toBe( true );
-        expect( blobEvents.at( -1 ) ).toBe( 3 );
+        expect( blobbed.contentType?.startsWith( 'text/plain' )).toBe( true );
+        expect( blobEvents ).toEqual([ 0, 3 ]);
 
-        const untyped = await applyUploadProgress( new Blob([ 'z' ]), () => {} );
+        const untyped = await applyUploadProgress( new Blob([ 'z' ]), () => {});
 
         expect( untyped.contentType ).toBeUndefined();
 
@@ -62,32 +62,33 @@ describe( 'progress', () =>
 
         fd.append( 'a', 'b' );
 
-        const formed = await applyUploadProgress( fd, () => {} );
+        const formed = await applyUploadProgress( fd, () => {});
 
         expect( formed.contentType ).toMatch( /^multipart\/form-data/ );
         await new Response( formed.body ).arrayBuffer();
     });
 
-    it( 'should tap a web ReadableStream and an async iterable', async () =>
+    it( 'should tap a web ReadableStream and an async iterable including ArrayBufferView chunks', async () =>
     {
         const streamEvents: number[] = [];
         const source = new ReadableStream<Uint8Array>({
             start( controller )
             {
-                controller.enqueue( new TextEncoder().encode( 'hi' ) );
+                controller.enqueue( new TextEncoder().encode( 'hi' ));
                 controller.close();
             }
         });
         const tapped = await applyUploadProgress( source, ( event ) => { streamEvents.push( event.loaded ) });
 
-        expect( await new Response( tapped.body ).text() ).toBe( 'hi' );
-        expect( streamEvents.at( -1 ) ).toBe( 2 );
+        expect( await new Response( tapped.body ).text()).toBe( 'hi' );
+        expect( streamEvents.at( -1 )).toBe( 2 );
 
         async function* chunks()
         {
             yield 'a';
             yield new Uint8Array([ 1 ]);
             yield new ArrayBuffer( 1 );
+            yield new DataView( new Uint8Array([ 9, 8, 7 ]).buffer, 1, 2 );
         }
 
         const iterableEvents: number[] = [];
@@ -96,28 +97,79 @@ describe( 'progress', () =>
             ( event ) => { iterableEvents.push( event.loaded ) }
         );
 
-        expect( await new Response( iterated.body ).arrayBuffer() ).toHaveProperty( 'byteLength', 3 );
-        expect( iterableEvents.at( -1 ) ).toBe( 3 );
+        expect( await new Response( iterated.body ).arrayBuffer()).toHaveProperty( 'byteLength', 5 );
+        expect( iterableEvents.at( -1 )).toBe( 5 );
+    });
+
+    it( 'should close the async iterator when the upload stream is canceled', async () =>
+    {
+        let returned = false;
+        const customIterable: AsyncIterable<string> =
+        {
+            [Symbol.asyncIterator]()
+            {
+                return {
+                    async next()
+                    {
+                        return { value : 'chunk', done : false };
+                    },
+                    async return()
+                    {
+                        returned = true;
+
+                        return { value : undefined, done : true };
+                    }
+                };
+            }
+        };
+
+        const tracked = await applyUploadProgress( customIterable as unknown as BodyInit, () => {});
+        const reader = ( tracked.body as ReadableStream<Uint8Array> ).getReader();
+
+        await reader.read();
+        await reader.cancel( 'abort' );
+        expect( returned ).toBe( true );
+
+        const bareIterable: AsyncIterable<string> =
+        {
+            [Symbol.asyncIterator]()
+            {
+                return {
+                    async next()
+                    {
+                        return { value : 'chunk', done : false };
+                    }
+                };
+            }
+        };
+
+        const bareTracked = await applyUploadProgress( bareIterable as unknown as BodyInit, () => {});
+        const bareReader = ( bareTracked.body as ReadableStream<Uint8Array> ).getReader();
+
+        await bareReader.read();
+        await bareReader.cancel( 'abort' );
     });
 
     it( 'should pass through unknown upload bodies', async () =>
     {
-        const result = await applyUploadProgress( 1 as unknown as BodyInit, () => {} );
+        const result = await applyUploadProgress( 1 as unknown as BodyInit, () => {});
 
         expect( result.body ).toBe( 1 );
     });
 
     it( 'should report download progress and handle an empty body', async () =>
     {
-        const events: Array<{ loaded: number, total?: number }> = [];
+        const events: Array<{ loaded : number, total? : number }> = [];
         const response = applyDownloadProgress(
-            new Response( 'hello', { headers: { 'content-length': '5' } }),
-            ( event ) => { events.push({ loaded: event.loaded, total: event.total }) }
+            new Response( 'hello', { headers : { 'content-length' : '5' } }),
+            ( event ) => { events.push({ loaded : event.loaded, total : event.total }) }
         );
 
-        expect( await response.text() ).toBe( 'hello' );
-        expect( events[0] ).toMatchObject({ loaded: 0, total: 5 });
-        expect( events.at( -1 ) ).toMatchObject({ loaded: 5, total: 5 });
+        expect( await response.text()).toBe( 'hello' );
+        expect( events ).toEqual([
+            { loaded : 0, total : 5 },
+            { loaded : 5, total : 5 }
+        ]);
 
         const emptyEvents: number[] = [];
         const empty = applyDownloadProgress(
@@ -131,8 +183,8 @@ describe( 'progress', () =>
         const noLength: number[] = [];
         const plain = applyDownloadProgress( new Response( 'ab' ), ( event ) => { noLength.push( event.loaded ) });
 
-        expect( await plain.text() ).toBe( 'ab' );
-        expect( noLength.at( -1 ) ).toBe( 2 );
+        expect( await plain.text()).toBe( 'ab' );
+        expect( noLength.at( -1 )).toBe( 2 );
     });
 
     it( 'should cancel a tapped download stream', async () =>
@@ -140,10 +192,10 @@ describe( 'progress', () =>
         const source = new ReadableStream<Uint8Array>({
             start( controller )
             {
-                controller.enqueue( new TextEncoder().encode( 'keep' ) );
+                controller.enqueue( new TextEncoder().encode( 'keep' ));
             }
         });
-        const response = applyDownloadProgress( new Response( source ), () => {} );
+        const response = applyDownloadProgress( new Response( source ), () => {});
         const reader = response.body!.getReader();
 
         await reader.read();
